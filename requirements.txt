@@ -1,0 +1,9 @@
+supabase>=2.25.0
+pydantic>=2.0.0
+pandas>=2.0.0
+rdflib>=7.0.0
+transformers>=4.40.0
+torch            # or torch-cpu if you prefer, see PyTorch site
+sentencepiece
+python-dotenv>=1.0.0
+huggingface_hub
