@@ -8,7 +8,9 @@ import os
 from config import get_supabase_client
 from pipeline import MealETL
 from datasets.kaggle_unified import load_kaggle_csv
+from logger_utils import get_logger
 
+logger = get_logger("ingest_kaggle_all")
 
 def ingest_folder(folder: str = "data/kaggle") -> None:
     client = get_supabase_client()
@@ -18,35 +20,105 @@ def ingest_folder(folder: str = "data/kaggle") -> None:
     files = sorted(glob.glob(pattern))
 
     if not files:
-        print(f"[Kaggle] No CSV files found in {folder}")
+        logger.warning(
+            "No CSV files found in folder '%s'",
+            folder,
+            extra={
+                "invoking_func": "ingest_folder",
+                "invoking_purpose": "Batch ingest all Kaggle CSV files in a folder",
+                "next_step": "Exit script",
+                "resolution": "Place Kaggle CSV files under data/kaggle and rerun",
+            },
+        )
         return
 
-    print(f"[Kaggle] Found {len(files)} CSV file(s):")
-    for f in files:
-        print("  -", f)
+    logger.info(
+        "Found %d Kaggle CSV files under '%s'",
+        len(files),
+        folder,
+        extra={
+            "invoking_func": "ingest_folder",
+            "invoking_purpose": "Batch ingest all Kaggle CSV files in a folder",
+            "next_step": "Loop over files and load them",
+            "resolution": "",
+        },
+    )
 
     total_recipes = 0
 
     for fpath in files:
         dataset_name = os.path.splitext(os.path.basename(fpath))[0]
-        print(f"\n[Kaggle] Loading {fpath} as dataset '{dataset_name}'")
+        logger.info(
+            "Loading file '%s' as dataset '%s'",
+            fpath,
+            dataset_name,
+            extra={
+                "invoking_func": "ingest_folder",
+                "invoking_purpose": "Batch ingest all Kaggle CSV files in a folder",
+                "next_step": "Call load_kaggle_csv and then MealETL.ingest_recipe",
+                "resolution": "",
+            },
+        )
+
         try:
             recipes = load_kaggle_csv(fpath, dataset_name=dataset_name)
         except Exception as exc:  # noqa: BLE001
-            print(f"[Kaggle] Failed to load {fpath}: {exc}")
+            logger.error(
+                "Failed to load Kaggle CSV '%s': %s",
+                fpath,
+                exc,
+                extra={
+                    "invoking_func": "ingest_folder",
+                    "invoking_purpose": "Batch ingest all Kaggle CSV files in a folder",
+                    "next_step": "Skip this file and continue with next",
+                    "resolution": "Inspect the CSV format and fix columns / encoding",
+                },
+                exc_info=True,
+            )
             continue
 
-        print(f"[Kaggle] Ingesting {len(recipes)} recipes from {dataset_name} ...")
+        logger.info(
+            "Ingesting %d recipes from dataset '%s'",
+            len(recipes),
+            dataset_name,
+            extra={
+                "invoking_func": "ingest_folder",
+                "invoking_purpose": "Batch ingest all Kaggle CSV files in a folder",
+                "next_step": "Loop over RecipeRecord objects and ingest them",
+                "resolution": "",
+            },
+        )
 
         for idx, rec in enumerate(recipes):
             try:
                 etl.ingest_recipe(rec, index=idx)
             except Exception as exc:  # noqa: BLE001
-                print(f"[Kaggle] Error ingesting recipe '{rec.title}': {exc}")
+                logger.error(
+                    "Error ingesting recipe '%s' from dataset '%s': %s",
+                    rec.title,
+                    dataset_name,
+                    exc,
+                    extra={
+                        "invoking_func": "ingest_folder",
+                        "invoking_purpose": "Batch ingest all Kaggle CSV files in a folder",
+                        "next_step": "Skip this recipe and continue",
+                        "resolution": "Inspect this recipe's data / DB constraints",
+                    },
+                    exc_info=True,
+                )
 
         total_recipes += len(recipes)
 
-    print(f"\n[Kaggle] Finished ingesting all datasets. Total recipes: {total_recipes}")
+    logger.info(
+        "Finished ingesting all Kaggle datasets. Total recipes: %d",
+        total_recipes,
+        extra={
+            "invoking_func": "ingest_folder",
+            "invoking_purpose": "Batch ingest all Kaggle CSV files in a folder",
+            "next_step": "Exit script",
+            "resolution": "",
+        },
+    )
 
 
 if __name__ == "__main__":

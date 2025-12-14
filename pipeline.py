@@ -21,17 +21,17 @@ from taxonomy_seed import ensure_tag_type, ensure_tag
 from datasets.base import RecipeRecord
 from datasets.indian_kaggle import load_indian_kaggle_csv
 from nlp_tagging import RecipeNLP, TagCandidate
-
+from logging_utils import get_logger
 
 # ---------------------------------------------------------
 # LOGGING: minimal, fast, no per-row logs
 # ---------------------------------------------------------
-logging.basicConfig(
-    level=logging.WARNING,  # Only log errors unless milestone reached
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger("pipeline")
-
+# Removing old way of logging and using custom logger from logging_utils.py
+#logging.basicConfig(
+#    level=logging.WARNING,  # Only log errors unless milestone reached
+#    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+#)
+logger = getLogger("pipeline")
 
 class MealETL:
     def __init__(self, client: Client) -> None:
@@ -280,7 +280,17 @@ class MealETL:
 
         # Milestone logging: every 50 rows
         if index is not None and index % 50 == 0:
-            logger.warning(f"Milestone: {index} recipes ingested. Last = {rec.title}")
+            logger.warning(
+                "Milestone: %d recipes ingested. Last='%s'",
+                index,
+                rec.title,
+                extra={
+                    "invoking_func": "ingest_indian_kaggle",
+                    "invoking_purpose": "Batch ingest a single Kaggle-style CSV file into Supabase",
+                    "next_step": "Continue ingestion loop with next recipe",
+                    "resolution": "",
+                },
+            )
 
         return meal_id
 
@@ -295,19 +305,57 @@ def ingest_indian_kaggle(path: str) -> None:
     # Limiting to first 20 for testing only
     #recipes = recipes[:20]  # limit for testing for first 20 recipes
 
-    logger.warning(f"Starting ingestion of {len(recipes)} recipes...")
+    #logger.warning(f"Starting ingestion of {len(recipes)} recipes...")
+    
+    logger.info(
+        "Starting ingestion of %d recipes from '%s'",
+        len(recipes),
+        path,
+        extra={
+            "invoking_func": "ingest_indian_kaggle",
+            "invoking_purpose": "Batch ingest legacy Indian Kaggle CSV via MealETL",
+            "next_step": "Loop over RecipeRecord objects and ingest them",
+            "resolution": "",
+        },
+    )
 
     for idx, rec in enumerate(recipes):
         try:
             etl.ingest_recipe(rec, index=idx)
         except Exception as exc:
             # Only errors go to logs
+            #logger.error(
+            #    f"Failed to ingest recipe '{rec.title}' (ID={rec.external_id}): {exc}",
+            #    exc_info=True,
+            #)
+            # New Log structure
             logger.error(
-                f"Failed to ingest recipe '{rec.title}' (ID={rec.external_id}): {exc}",
+                "Failed to ingest recipe '%s' (external_id=%s): %s",
+                rec.title,
+                rec.external_id,
+                exc,
+                extra={
+                    "invoking_func": "ingest_indian_kaggle",
+                    "invoking_purpose": "Batch ingest legacy Indian Kaggle CSV via MealETL",
+                    "next_step": "Skip this recipe and continue with next one",
+                    "resolution": "Inspect this recipe row and Supabase constraints; fix data or schema and rerun if needed",
+                },
                 exc_info=True,
             )
 
-    logger.warning("Ingestion completed successfully.")
+    #logger.warning("Ingestion completed successfully.")
+    # New logs structure
+    logger.info(
+        "Ingestion completed for %d recipes from '%s'",
+        len(recipes),
+        path,
+        extra={
+            "invoking_func": "ingest_indian_kaggle",
+            "invoking_purpose": "Batch ingest legacy Indian Kaggle CSV via MealETL",
+            "next_step": "Exit script",
+            "resolution": "",
+        },
+    )
 
 
 if __name__ == "__main__":

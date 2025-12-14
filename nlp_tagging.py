@@ -37,8 +37,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
+from logging_utils import get_logger
+
+logger = get_logger("nlp_tagging")
 
 # Hugging Face imports – optional
+# Import HF only if transformers is installed
 try:
     from transformers import (
         AutoTokenizer,
@@ -50,7 +54,8 @@ except ImportError:  # transformers not installed
     AutoModelForTokenClassification = None
     pipeline = None
 
-
+# ----------------------------------------------------------------------
+# TagCandidate dataclass that pipeline.py can consume
 @dataclass
 class TagCandidate:
     tag_type: str
@@ -61,7 +66,8 @@ class TagCandidate:
     label_hi: Optional[str] = None
     label_hinglish: Optional[str] = None
 
-
+# ----------------------------------------------------------------------
+# RecipeNLP class that combines rule-based + NER-based tagging
 class RecipeNLP:
     """
     NLP for recipes combining:
@@ -70,32 +76,85 @@ class RecipeNLP:
 
     It outputs TagCandidate objects that pipeline.py turns into tags + meal_tags.
     """
-
+    # Popular model trained on TASTEset for food NER. This has diet, taste, process, etc. trained on more than 100K recipe sentences.
     MODEL_NAME = "dmargutierrez/distilbert-base-uncased-TASTESet-ner"
-
+    
+    # Intialize RecipeNLP, optionally loading HF model. This will log and proceed if transformers not installed.
+    # Purpose: Uses HuggingFace transformers to load a NER (Named Entity Recognition) model for recipe tagging.
     def __init__(self, model_name: str | None = None) -> None:
         self.model_name = model_name or self.MODEL_NAME
         self._ner = None
 
         if pipeline is None:
-            print("[RecipeNLP] transformers not installed; only rule-based tags will be used.")
-        else:
-            try:
-                tok = AutoTokenizer.from_pretrained(self.model_name)
-                model = AutoModelForTokenClassification.from_pretrained(self.model_name)
-                self._ner = pipeline(
-                    "token-classification",
-                    model=model,
-                    tokenizer=tok,
-                    aggregation_strategy="simple",
-                )
-                print(f"[RecipeNLP] Loaded HF NER model: {self.model_name}")
-            except Exception as exc:  # noqa: BLE001
-                print(f"[RecipeNLP] Failed to load HF model {self.model_name}: {exc}")
-                self._ner = None
+            # transformers not installed – log and proceed with rule-based only
+            logger.warning(
+                "transformers library not installed; NLP will use rule-based tags only",
+                extra={
+                    "invoking_func": "__init__",
+                    "invoking_purpose": "Initialize RecipeNLP and optionally load HF NER model",
+                    "next_step": "Proceed without loading HuggingFace model",
+                    "resolution": (
+                        "Install 'transformers' and 'torch' in the environment if NER is desired"
+                    ),
+                },
+            )
+            return
+
+        # Try to load HuggingFace model
+        try:
+            logger.info(
+                "Loading HuggingFace NER model '%s' for RecipeNLP",
+                self.model_name,
+                extra={
+                    "invoking_func": "__init__",
+                    "invoking_purpose": "Initialize RecipeNLP and optionally load HF NER model",
+                    "next_step": "Download/load tokenizer and model, build pipeline()",
+                    "resolution": "",
+                },
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            model = AutoModelForTokenClassification.from_pretrained(self.model_name)
+            self._ner = pipeline(
+                "token-classification",
+                model=model,
+                tokenizer=tokenizer,
+                aggregation_strategy="simple",
+            )
+
+            logger.info(
+                "Successfully loaded HuggingFace NER model '%s'",
+                self.model_name,
+                extra={
+                    "invoking_func": "__init__",
+                    "invoking_purpose": "Initialize RecipeNLP and optionally load HF NER model",
+                    "next_step": "Use NER alongside rule-based tagging in nlp_tags_for_recipe",
+                    "resolution": "",
+                },
+            )
+
+        except Exception as exc:  # noqa: BLE001
+            # Log failure but keep rule-based tagging available
+            logger.error(
+                "Failed to load HuggingFace NER model '%s': %s",
+                self.model_name,
+                exc,
+                extra={
+                    "invoking_func": "__init__",
+                    "invoking_purpose": "Initialize RecipeNLP and optionally load HF NER model",
+                    "next_step": "Disable NER and use only rule-based tags",
+                    "resolution": (
+                        "Check internet / HF model availability; verify model name; "
+                        "fix environment and retry if NER is needed"
+                    ),
+                },
+                exc_info=True,
+            )
+            self._ner = None
 
     # ------------------------------------------------------------------
-    # Time bucketing (used in pipeline.dataset_tags)
+    # Time bucketing (used in pipeline.dataset_tags).
+    # Purpose: Simple bucketing of total time into under_15_min, under_30_min, etc.
     # ------------------------------------------------------------------
     def bucket_time(self, total_minutes: int | None) -> Optional[TagCandidate]:
         if total_minutes is None:
@@ -124,6 +183,7 @@ class RecipeNLP:
 
     # ------------------------------------------------------------------
     # Rule-based keyword tagging
+    # Purpose: Heuristic tags from plain-text keywords (English / Hinglish).
     # ------------------------------------------------------------------
     # Diet keywords
     DIET_KEYWORDS = {
@@ -339,11 +399,12 @@ class RecipeNLP:
     }
 
     # ------------ Rule-based taggers ------------
-
+    # This is a helper to check if any keyword is in text and accordingly add tags.
     @staticmethod
     def _text_contains_any(text: str, keywords: list[str]) -> bool:
         return any(kw in text for kw in keywords)
 
+    # Purpose: This function scans the text for keywords defined above and generates TagCandidate objects.
     def rule_based_tags(self, text: str) -> List[TagCandidate]:
         """
         Heuristic tags from plain-text keywords (English / Hinglish).
@@ -417,10 +478,12 @@ class RecipeNLP:
 
     # ------------------------------------------------------------------
     # NER-based tags
+    # Purpose: Use HuggingFace NER model to extract tags from text and map to TagCandidate.
     # ------------------------------------------------------------------
     def _ner_available(self) -> bool:
         return self._ner is not None
 
+    # Purpose: Map NER entity labels to TagCandidate objects and also assign tag_type.
     def _map_entity_to_tag(
         self,
         label_raw: str,
@@ -475,6 +538,7 @@ class RecipeNLP:
 
         return None
 
+    # Purpose: Run NER on text and return list of TagCandidate objects.
     def ner_tags(self, text: str) -> List[TagCandidate]:
         if not self._ner_available():
             return []
@@ -498,6 +562,7 @@ class RecipeNLP:
 
     # ------------------------------------------------------------------
     # Entry point used by pipeline.py
+    # Purpose: Combine ingredients + extra recipe text (title, instructions) and return a richer set of TagCandidates.
     # ------------------------------------------------------------------
     def nlp_tags_for_recipe(
         self,
@@ -534,6 +599,20 @@ class RecipeNLP:
             if existing is None or cand.confidence > existing.confidence:
                 merged[key] = cand
 
-        return list(merged.values())
+        final_tags = list(merged.values())
+
+        logger.debug(
+            "Generated %d NLP tags (rule-based=%d, ner=%d)",
+            len(final_tags),
+            len(rule_tags),
+            len(ner_tags),
+            extra={
+                "invoking_func": "nlp_tags_for_recipe",
+                "invoking_purpose": "Derive TagCandidate objects from ingredients + text",
+                "next_step": "Return tags to caller (MealETL.nlp_tags)",
+                "resolution": "",
+            },
+        )
+        return final_tags
 
 
