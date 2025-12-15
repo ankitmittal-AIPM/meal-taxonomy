@@ -20,7 +20,7 @@ import os
 
 import pandas as pd
 
-from datasets.base import RecipeRecord
+from src.meal_taxonomy.datasets.base import RecipeRecord
 
 
 def _normalize_col_name(col: str) -> str:

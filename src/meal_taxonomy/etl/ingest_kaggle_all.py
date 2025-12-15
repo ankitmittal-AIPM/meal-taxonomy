@@ -16,8 +16,8 @@ import glob
 import os
 
 from src.meal_taxonomy.config import get_supabase_client
-from etl.pipeline import MealETL
-from datasets.kaggle_unified import load_kaggle_csv
+from src.meal_taxonomy.etl.pipeline import MealETL
+from src.meal_taxonomy.datasets.kaggle_unified import load_kaggle_csv
 from src.meal_taxonomy.logging_utils import get_logger
 
 MODULE_PURPOSE = (

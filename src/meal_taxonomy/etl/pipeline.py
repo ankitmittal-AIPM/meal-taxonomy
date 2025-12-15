@@ -17,10 +17,10 @@ from typing import Dict, List
 from supabase import Client
 
 from src.meal_taxonomy.config import get_supabase_client
-from taxonomy.taxonomy_seed import ensure_tag_type, ensure_tag
-from datasets.base import RecipeRecord
-from datasets.indian_kaggle import load_indian_kaggle_csv
-from meal_taxonomy.nlp_tagging import RecipeNLP, TagCandidate
+from src.meal_taxonomy.taxonomy.taxonomy_seed import ensure_tag_type, ensure_tag
+from src.meal_taxonomy.datasets.base import RecipeRecord
+from src.meal_taxonomy.datasets.indian_kaggle import load_indian_kaggle_csv
+from src.meal_taxonomy.nlp_tagging import RecipeNLP, TagCandidate
 from src.meal_taxonomy.logging_utils import get_logger
 
 MODULE_PURPOSE = (
