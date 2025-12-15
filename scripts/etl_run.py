@@ -32,12 +32,15 @@ import argparse
 import datetime
 from typing import List
 
-from meal_taxonomy.logging_utils import LOG_RUN_ID, log_info, log_error
-from meal_taxonomy.etl.pipeline import ingest_indian_kaggle
-from meal_taxonomy.etl.ingest_kaggle_all import ingest_folder as ingest_kaggle_folder
-from meal_taxonomy.ontologies.foodon_import import main as foodon_main
-from meal_taxonomy.ontologies.build_ingredient_category_tags import main as category_main
-from meal_taxonomy.ontologies.kaggle_ontology_import import main as kaggle_onto_main
+from src.meal_taxonomy.logging_utils import RUN_ID, get_logger
+from src.meal_taxonomy.etl.pipeline import ingest_indian_kaggle
+from src.meal_taxonomy.etl.ingest_kaggle_all import ingest_folder as ingest_kaggle_folder
+from src.meal_taxonomy.ontologies.foodon_import import main as foodon_main
+from src.meal_taxonomy.ontologies.build_ingredient_category_tags import main as category_main
+from src.meal_taxonomy.ontologies.kaggle_ontology_import import main as kaggle_onto_main
+
+# Structured logger for this runner
+logger = get_logger("etl_run")
 
 MODULE_PURPOSE = (
     "Unified ETL runner coordinating ingestion, ontology linking, and tagging "
@@ -50,13 +53,27 @@ def print_run_banner(enabled_steps: List[str]) -> None:
     banner = [
         "\n===============================================================",
         "  MEAL-TAXONOMY ETL RUN",
-        f"  Run ID       : {LOG_RUN_ID}",
+        f"  Run ID       : {RUN_ID}",
         f"  UTC Time     : {now.strftime('%Y-%m-%d %H:%M:%S')}",
         "  Enabled Steps:",
     ]
     for step in enabled_steps:
         banner.append(f"    • {step}")
+
     banner.append("===============================================================\n")
+    # Also emit a structured log with enabled steps for observability
+    logger.info(
+        "Starting ETL run; enabled steps: %s",
+        ", ".join(enabled_steps) or "(none)",
+        extra={
+            "invoking_func": "print_run_banner",
+            "invoking_purpose": MODULE_PURPOSE,
+            "next_step": "Begin ETL run",
+            "resolution": "",
+        },
+    )
+
+    # Keep pretty banner on stdout for operator visibility
     print("\n".join(banner))
 
 
@@ -66,124 +83,147 @@ def run_etl(args) -> None:
     # Kaggle
     if args.kaggle:
         steps_run.append("Kaggle ingestion")
-        log_info(
+        logger.info(
             "Starting Kaggle ingestion step",
-            module_purpose=MODULE_PURPOSE,
-            invoking_function="run_etl",
-            invoking_purpose="Unified ETL execution flow",
-            next_step="Call ingest_kaggle_folder",
+            extra={
+                "invoking_func": "run_etl",
+                "invoking_purpose": "Unified ETL execution flow",
+                "next_step": "Call ingest_kaggle_folder",
+                "resolution": "",
+            },
         )
         try:
             ingest_kaggle_folder("data/kaggle")
         except Exception as exc:
-            log_error(
-                "Kaggle ingestion failed",
-                module_purpose=MODULE_PURPOSE,
-                invoking_function="run_etl",
-                invoking_purpose="Unified ETL execution flow",
-                next_step="Fix CSV or loader, then rerun.",
-                resolution="Inspect error and Kaggle CSV formats.",
-                exc=exc,
+            logger.error(
+                "Kaggle ingestion failed: %s",
+                exc,
+                extra={
+                    "invoking_func": "run_etl",
+                    "invoking_purpose": "Unified ETL execution flow",
+                    "next_step": "Fix CSV or loader, then rerun.",
+                    "resolution": "Inspect error and Kaggle CSV formats.",
+                },
+                exc_info=True,
             )
 
     # Legacy Indian
     if args.indian:
         steps_run.append("Indian Kaggle ingestion")
-        log_info(
+        logger.info(
             "Starting legacy Indian Kaggle ingestion",
-            module_purpose=MODULE_PURPOSE,
-            invoking_function="run_etl",
-            invoking_purpose="Unified ETL execution flow",
-            next_step="Call ingest_indian_kaggle('data/indian_food.csv')",
+            extra={
+                "invoking_func": "run_etl",
+                "invoking_purpose": "Unified ETL execution flow",
+                "next_step": "Call ingest_indian_kaggle('data/indian_food.csv')",
+                "resolution": "",
+            },
         )
         try:
             ingest_indian_kaggle("data/indian_food.csv")
         except Exception as exc:
-            log_error(
-                "Indian Kaggle ingestion failed",
-                module_purpose=MODULE_PURPOSE,
-                invoking_function="run_etl",
-                invoking_purpose="Unified ETL execution flow",
-                next_step="Skip this dataset or fix CSV.",
-                resolution="Check CSV format / data issues.",
-                exc=exc,
+            logger.error(
+                "Indian Kaggle ingestion failed: %s",
+                exc,
+                extra={
+                    "invoking_func": "run_etl",
+                    "invoking_purpose": "Unified ETL execution flow",
+                    "next_step": "Skip this dataset or fix CSV.",
+                    "resolution": "Check CSV format / data issues.",
+                },
+                exc_info=True,
             )
 
     # FoodOn
     if args.foodon:
         steps_run.append("FoodOn synonyms import")
-        log_info(
+        logger.info(
             "Starting FoodOn ingredient linking",
-            module_purpose=MODULE_PURPOSE,
-            invoking_function="run_etl",
-            invoking_purpose="Unified ETL execution flow",
-            next_step="Call foodon_main()",
+            extra={
+                "invoking_func": "run_etl",
+                "invoking_purpose": "Unified ETL execution flow",
+                "next_step": "Call foodon_main()",
+                "resolution": "",
+            },
         )
         try:
             foodon_main()
         except Exception as exc:
-            log_error(
-                "FoodOn linking failed",
-                module_purpose=MODULE_PURPOSE,
-                invoking_function="run_etl",
-                invoking_purpose="Unified ETL execution flow",
-                next_step="Inspect TSV and ontology tables.",
-                resolution="Fix TSV or DB schema and rerun.",
-                exc=exc,
+            logger.error(
+                "FoodOn linking failed: %s",
+                exc,
+                extra={
+                    "invoking_func": "run_etl",
+                    "invoking_purpose": "Unified ETL execution flow",
+                    "next_step": "Inspect TSV and ontology tables.",
+                    "resolution": "Fix TSV or DB schema and rerun.",
+                },
+                exc_info=True,
             )
 
     # Ingredient categories
     if args.category:
         steps_run.append("Ontology-based ingredient categories")
-        log_info(
+        logger.info(
             "Starting ingredient_category derivation",
-            module_purpose=MODULE_PURPOSE,
-            invoking_function="run_etl",
-            invoking_purpose="Unified ETL execution flow",
-            next_step="Call category_main()",
+            extra={
+                "invoking_func": "run_etl",
+                "invoking_purpose": "Unified ETL execution flow",
+                "next_step": "Call category_main()",
+                "resolution": "",
+            },
         )
         try:
             category_main()
         except Exception as exc:
-            log_error(
-                "Ingredient category tagging failed",
-                module_purpose=MODULE_PURPOSE,
-                invoking_function="run_etl",
-                invoking_purpose="Unified ETL execution flow",
-                next_step="Check ontology_relations / FoodOn config.",
-                resolution="Fix mappings and rerun.",
-                exc=exc,
+            logger.error(
+                "Ingredient category tagging failed: %s",
+                exc,
+                extra={
+                    "invoking_func": "run_etl",
+                    "invoking_purpose": "Unified ETL execution flow",
+                    "next_step": "Check ontology_relations / FoodOn config.",
+                    "resolution": "Fix mappings and rerun.",
+                },
+                exc_info=True,
             )
 
     # Kaggle ontology
     if args.kaggle_onto:
         steps_run.append("Kaggle ontology import")
-        log_info(
+        logger.info(
             "Starting Kaggle ontology import",
-            module_purpose=MODULE_PURPOSE,
-            invoking_function="run_etl",
-            invoking_purpose="Unified ETL execution flow",
-            next_step="Call kaggle_onto_main()",
+            extra={
+                "invoking_func": "run_etl",
+                "invoking_purpose": "Unified ETL execution flow",
+                "next_step": "Call kaggle_onto_main()",
+                "resolution": "",
+            },
         )
         try:
             kaggle_onto_main()
         except Exception as exc:
-            log_error(
-                "Kaggle ontology import failed",
-                module_purpose=MODULE_PURPOSE,
-                invoking_function="run_etl",
-                invoking_purpose="Unified ETL execution flow",
-                next_step="Check meals.meta and Kaggle datasets.",
-                resolution="Fix metadata inconsistencies and rerun.",
-                exc=exc,
+            logger.error(
+                "Kaggle ontology import failed: %s",
+                exc,
+                extra={
+                    "invoking_func": "run_etl",
+                    "invoking_purpose": "Unified ETL execution flow",
+                    "next_step": "Check meals.meta and Kaggle datasets.",
+                    "resolution": "Fix metadata inconsistencies and rerun.",
+                },
+                exc_info=True,
             )
 
-    log_info(
-        f"ETL run completed. Steps executed: {', '.join(steps_run)}",
-        module_purpose=MODULE_PURPOSE,
-        invoking_function="run_etl",
-        invoking_purpose="Unified ETL execution flow",
-        next_step="Exit script or start next pipeline stage.",
+    logger.info(
+        "ETL run completed. Steps executed: %s",
+        ", ".join(steps_run),
+        extra={
+            "invoking_func": "run_etl",
+            "invoking_purpose": "Unified ETL execution flow",
+            "next_step": "Exit script or start next pipeline stage.",
+            "resolution": "",
+        },
     )
 
 
