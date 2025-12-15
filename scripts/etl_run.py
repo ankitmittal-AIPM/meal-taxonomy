@@ -32,6 +32,7 @@ import datetime
 import sys
 from pathlib import Path
 from typing import List
+import logging
 
 # --- Make project root importable so `src.*` imports work even when this
 # --- script is executed from the `scripts/` directory.
@@ -49,6 +50,14 @@ from src.meal_taxonomy.ontologies.kaggle_ontology_import import main as kaggle_o
 
 # Structured logger for this runner
 logger = get_logger("etl_run")
+
+# Keep our own logs at INFO
+logging.basicConfig(level=logging.INFO)
+
+# Silence noisy HTTP logs from httpx / httpcore / supabase_py
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("supabase_py").setLevel(logging.WARNING)
 
 MODULE_PURPOSE = (
     "Unified ETL runner coordinating ingestion, ontology linking, and tagging "

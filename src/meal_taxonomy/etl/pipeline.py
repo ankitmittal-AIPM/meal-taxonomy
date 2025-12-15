@@ -20,7 +20,7 @@ b. Per-recipe and per-ingredient logging is at DEBUG level, so it won’t flood 
 """
 
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from supabase import Client
 
@@ -218,7 +218,7 @@ class MealETL:
                     value=region.lower().replace(" ", "_"),
                     label_en=region.title(),
                     is_primary=True,
-                    confidence=1.0,
+                    confidence=1.0,   
                 )
             )
 
@@ -310,7 +310,7 @@ class MealETL:
                     "tag_id": tag_id,
                     "confidence": cand.confidence,
                     "is_primary": cand.is_primary,
-                    "source": source,
+                    "source": source
                 }
             )
         if rows:
@@ -319,10 +319,11 @@ class MealETL:
         # Safe bulk upsert version
         rows = [
             {
+                "tag_id": tag_id[(tc.tag_type, tc.value)],  # or whatever your key is
+                "source": tc.source or source or "unknown",
+                "confidence": tc.confidence,
                 "meal_id": meal_id,
-                "tag_type": tc.tag_type,
-                "tag_value": tc.value,
-                "source": tc.source,
+                "is_primary": tc.is_primary,
             }
             for tc in candidates
         ]

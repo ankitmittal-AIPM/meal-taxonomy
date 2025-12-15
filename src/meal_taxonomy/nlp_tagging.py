@@ -65,6 +65,9 @@ class TagCandidate:
     label_hi: Optional[str] = None
     label_hinglish: Optional[str] = None
 
+    # NEW FIELD – optional, default None, so all existing usages still work
+    source: Optional[str] = None
+
 # ----------------------------------------------------------------------
 # RecipeNLP class that combines rule-based + NER-based tagging
 class RecipeNLP:
