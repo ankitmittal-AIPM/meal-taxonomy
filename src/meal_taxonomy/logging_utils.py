@@ -1,3 +1,4 @@
+from __future__ import annotations
 # logging_utils.py
 """
 Shared structured logging utilities.
@@ -31,8 +32,6 @@ Log format (one line):
 <ModulePurpose>|<InvokingFunction>|<InvokingPurpose>
 <DetailedMsg>|<NextStep>|<Resolution>|END
 """
-
-from __future__ import annotations
 
 import datetime
 import inspect

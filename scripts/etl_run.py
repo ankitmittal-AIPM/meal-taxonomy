@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 etl_run.py
 
@@ -26,11 +27,18 @@ Usage:
     python scripts/etl_run.py --kaggle --foodon
 """
 
-from __future__ import annotations
-
 import argparse
 import datetime
+import sys
+from pathlib import Path
 from typing import List
+
+# --- Make project root importable so `src.*` imports work even when this
+# --- script is executed from the `scripts/` directory.
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+# --- Ignore above for linting/static analysis tools.
 
 from src.meal_taxonomy.logging_utils import RUN_ID, get_logger
 from src.meal_taxonomy.etl.pipeline import ingest_indian_kaggle
