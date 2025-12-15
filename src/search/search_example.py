@@ -1,5 +1,5 @@
 # search_example.py. Testing Search
-from config import get_supabase_client
+from src.meal_taxonomy.config import get_supabase_client
 
 def run_search() -> None:
     client = get_supabase_client()

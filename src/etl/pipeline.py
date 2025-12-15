@@ -16,12 +16,12 @@ from typing import Dict, List
 
 from supabase import Client
 
-from config import get_supabase_client
-from taxonomy_seed import ensure_tag_type, ensure_tag
+from src.meal_taxonomy.config import get_supabase_client
+from taxonomy.taxonomy_seed import ensure_tag_type, ensure_tag
 from datasets.base import RecipeRecord
 from datasets.indian_kaggle import load_indian_kaggle_csv
 from nlp_tagging import RecipeNLP, TagCandidate
-from logging_utils import get_logger
+from src.meal_taxonomy.logging_utils import get_logger
 
 # ---------------------------------------------------------
 # LOGGING: minimal, fast, no per-row logs

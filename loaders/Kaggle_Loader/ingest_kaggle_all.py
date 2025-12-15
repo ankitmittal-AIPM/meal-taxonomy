@@ -5,8 +5,8 @@ from __future__ import annotations
 import glob
 import os
 
-from config import get_supabase_client
-from pipeline import MealETL
+from src.meal_taxonomy.config import get_supabase_client
+from etl.pipeline import MealETL
 from datasets.kaggle_unified import load_kaggle_csv
 from logger_utils import get_logger
 

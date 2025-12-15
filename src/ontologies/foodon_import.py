@@ -26,9 +26,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from config import get_supabase_client
-from ontologies import link_ingredients_via_foodon_synonyms
-from logging_utils import get_logger
+from src.meal_taxonomy.config import get_supabase_client
+from ontologies.ontologies import link_ingredients_via_foodon_synonyms
+from src.meal_taxonomy.logging_utils import get_logger
 
 
 # Module-level logger with structured formatting

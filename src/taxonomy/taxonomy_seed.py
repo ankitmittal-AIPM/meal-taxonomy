@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Dict
 from supabase import Client
 
-from config import get_supabase_client
+from src.meal_taxonomy.config import get_supabase_client
 
 
 TAG_TYPES: Dict[str, str] = {

@@ -17,9 +17,9 @@ Logging:
 from __future__ import annotations
 
 from typing import Dict, Set
-from config import get_supabase_client
+from src.meal_taxonomy.config import get_supabase_client
 from taxonomy_seed import ensure_tag_type, ensure_tag
-from logging_utils import get_logger
+from src.meal_taxonomy.logging_utils import get_logger
 
 logger = get_logger("kaggle_ontology_import")
 

@@ -1,6 +1,6 @@
 # link_ingredients_to_ontology.py
-from config import get_supabase_client
-from ontologies import link_all_ingredients
+from src.meal_taxonomy.config import get_supabase_client
+from ontologies.ontologies import link_all_ingredients
 
 def main() -> None:
     client = get_supabase_client()

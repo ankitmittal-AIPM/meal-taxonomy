@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
-from logging_utils import get_logger
+from src.meal_taxonomy.logging_utils import get_logger
 
 logger = get_logger("nlp_tagging")
 
