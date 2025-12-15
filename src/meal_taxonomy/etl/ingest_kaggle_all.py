@@ -1,4 +1,14 @@
-# ingest_kaggle_all.py
+"""
+ingest_kaggle_all.py
+
+Purpose:
+    Batch-ingest all Kaggle CSV files under a folder (default: data/kaggle)
+    using the unified Kaggle loader and the MealETL pipeline.
+
+Usage:
+    from meal_taxonomy.etl.ingest_kaggle_all import ingest_folder
+    ingest_folder("data/kaggle")
+"""
 
 from __future__ import annotations
 
@@ -8,8 +18,11 @@ import os
 from src.meal_taxonomy.config import get_supabase_client
 from etl.pipeline import MealETL
 from datasets.kaggle_unified import load_kaggle_csv
-from meal_taxonomy.logging_utils import log_info, log_warning, log_error
+from src.meal_taxonomy.logging_utils import get_logger
 
+MODULE_PURPOSE = (
+    "Batch ingestion of multiple Kaggle CSV files into Supabase using MealETL."
+)
 
 logger = get_logger("ingest_kaggle_all")
 

@@ -28,6 +28,10 @@ import csv
 from pathlib import Path
 
 from supabase import Client
+from src.meal_taxonomy.logging_utils import get_logger
+
+
+logger = get_logger("ontologies")
 
 # This module starts with a simple hard-coded mapping.
 # Later you can generate this from FoodOn OWL / TSV files.
@@ -130,9 +134,26 @@ def link_all_ingredients(client: Client) -> None:
         linked_count += 1
 
     if linked_count:
-        print(f"[ontology] Linked {linked_count} ingredients to ontology terms.")
+        logger.info(
+            "Linked %d ingredients to ontology terms.",
+            linked_count,
+            extra={
+                "invoking_func": "link_all_ingredients",
+                "invoking_purpose": "Link local ingredients to ontology terms",
+                "next_step": "Continue processing other ingredients",
+                "resolution": "",
+            },
+        )
     else:
-        print("[ontology] No ingredients matched INGREDIENT_ONTOLOGY_MAP.")
+        logger.info(
+            "No ingredients matched ontology mapping",
+            extra={
+                "invoking_func": "link_all_ingredients",
+                "invoking_purpose": "Link local ingredients to ontology terms",
+                "next_step": "Consider expanding FOODON_INGREDIENT_MAPPING or importing FoodOn TSV",
+                "resolution": "",
+            },
+        )
         
 # -----------------------------------------------------------------------------
 # FoodOn integration: link ingredients to FoodOn terms using foodon-synonyms.tsv
@@ -255,19 +276,44 @@ def link_ingredients_via_foodon_synonyms(client: Client, tsv_path: str) -> None:
     """
     path = Path(tsv_path)
     if not path.exists():
-        print(f"[foodon] TSV not found at: {path}")
+        logger.error(
+            "FoodOn synonyms TSV not found at '%s'",
+            path,
+            extra={
+                "invoking_func": "link_ingredients_via_foodon_synonyms",
+                "invoking_purpose": "Match ingredients to FoodOn via synonyms TSV",
+                "next_step": "Abort operation",
+                "resolution": "Place data/foodon-synonyms.tsv or pass correct path",
+            },
+        )
         return
 
     synonyms_rows = _load_foodon_synonyms(path)
     if not synonyms_rows:
-        print("[foodon] No usable rows found in FoodOn synonyms file.")
+        logger.warning(
+            "No usable rows found in FoodOn synonyms file",
+            extra={
+                "invoking_func": "link_ingredients_via_foodon_synonyms",
+                "invoking_purpose": "Match ingredients to FoodOn via synonyms TSV",
+                "next_step": "Abort operation",
+                "resolution": "Verify TSV format",
+            },
+        )
         return
 
     # Load ingredients from DB
     res = client.table("ingredients").select("id, name_en, ontology_term_iri").execute()
     ingredients = res.data or []
     if not ingredients:
-        print("[foodon] No ingredients found in DB.")
+        logger.warning(
+            "No ingredients found in DB to match against FoodOn synonyms",
+            extra={
+                "invoking_func": "link_ingredients_via_foodon_synonyms",
+                "invoking_purpose": "Match ingredients to FoodOn via synonyms TSV",
+                "next_step": "Populate ingredients table before retrying",
+                "resolution": "",
+            },
+        )
         return
 
     # Build matches: ingredient_id -> FoodOn term_id
@@ -291,7 +337,15 @@ def link_ingredients_via_foodon_synonyms(client: Client, tsv_path: str) -> None:
                 break  # take the first match
 
     if not matches:
-        print("[foodon] No ingredient names matched any FoodOn synonyms.")
+        logger.info(
+            "No ingredient names matched any FoodOn synonyms",
+            extra={
+                "invoking_func": "link_ingredients_via_foodon_synonyms",
+                "invoking_purpose": "Match ingredients to FoodOn via synonyms TSV",
+                "next_step": "Consider using fuzzy matching or expanding TSV",
+                "resolution": "",
+            },
+        )
         return
 
     linked_count = 0
@@ -333,4 +387,13 @@ def link_ingredients_via_foodon_synonyms(client: Client, tsv_path: str) -> None:
 
         linked_count += 1
 
-    print(f"[foodon] Linked {linked_count} ingredients to FoodOn terms using synonyms.")
+    logger.info(
+        "Linked %d ingredients to FoodOn terms using synonyms",
+        linked_count,
+        extra={
+            "invoking_func": "link_ingredients_via_foodon_synonyms",
+            "invoking_purpose": "Match ingredients to FoodOn via synonyms TSV",
+            "next_step": "Exit",
+            "resolution": "",
+        },
+    )

@@ -1,11 +1,24 @@
-# taxonomy_seed.py
+"""
+taxonomy_seed.py
+
+Purpose:
+    Seed the Supabase database with:
+      - tag_types (diet, meal_type, cuisine_region, etc.)
+      - initial tags (vegan, vegetarian, breakfast, South India, etc.)
+
+Usage:
+    python -m meal_taxonomy.taxonomy.taxonomy_seed
+"""
+
 from __future__ import annotations
 
 from typing import Dict
 from supabase import Client
 
 from src.meal_taxonomy.config import get_supabase_client
+from src.meal_taxonomy.logging_utils import log_info, log_error
 
+MODULE_PURPOSE = "Seed initial tag_types and tags for the meal taxonomy."
 
 TAG_TYPES: Dict[str, str] = {
     "diet": "Dietary patterns and restrictions (vegan, vegetarian, Jain, gluten_free, etc.)",
@@ -142,4 +155,12 @@ def seed_core_taxonomy() -> None:
 
 if __name__ == "__main__":
     seed_core_taxonomy()
-    print("Core taxonomy seeded.")
+    logger.info(
+        "Core taxonomy seeded",
+        extra={
+            "invoking_func": "__main__",
+            "invoking_purpose": "Seed core taxonomy tags and tag types",
+            "next_step": "Exit",
+            "resolution": "",
+        },
+    )

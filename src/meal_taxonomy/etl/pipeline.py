@@ -20,18 +20,25 @@ from src.meal_taxonomy.config import get_supabase_client
 from taxonomy.taxonomy_seed import ensure_tag_type, ensure_tag
 from datasets.base import RecipeRecord
 from datasets.indian_kaggle import load_indian_kaggle_csv
-from nlp_tagging import RecipeNLP, TagCandidate
+from meal_taxonomy.nlp_tagging import RecipeNLP, TagCandidate
 from src.meal_taxonomy.logging_utils import get_logger
 
+MODULE_PURPOSE = (
+    "ETL pipeline that creates meals, ingredients and attaches tags "
+    "for the Indian meal ontology / taxonomy."
+)
+
+"""Meal ETL pipeline orchestration.
+
+This module coordinates ingestion of RecipeRecord objects into Supabase
+and attaches ingredients and tags. Logging uses the shared structured
+formatter from `src.meal_taxonomy.logging_utils`.
+"""
+
 # ---------------------------------------------------------
-# LOGGING: minimal, fast, no per-row logs
+# LOGGING: use structured logger from logging_utils
 # ---------------------------------------------------------
-# Removing old way of logging and using custom logger from logging_utils.py
-#logging.basicConfig(
-#    level=logging.WARNING,  # Only log errors unless milestone reached
-#    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-#)
-logger = getLogger("pipeline")
+logger = get_logger("pipeline")
 
 class MealETL:
     def __init__(self, client: Client) -> None:

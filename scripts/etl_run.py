@@ -34,14 +34,10 @@ from typing import List
 
 from meal_taxonomy.logging_utils import LOG_RUN_ID, log_info, log_error
 from meal_taxonomy.etl.pipeline import ingest_indian_kaggle
+from meal_taxonomy.etl.ingest_kaggle_all import ingest_folder as ingest_kaggle_folder
 from meal_taxonomy.ontologies.foodon_import import main as foodon_main
 from meal_taxonomy.ontologies.build_ingredient_category_tags import main as category_main
 from meal_taxonomy.ontologies.kaggle_ontology_import import main as kaggle_onto_main
-from meal_taxonomy.config import get_supabase_client
-
-# Kaggle loader in scripts (not part of library):
-from scripts.ingest_kaggle_all import ingest_folder as ingest_kaggle_folder
-
 
 MODULE_PURPOSE = (
     "Unified ETL runner coordinating ingestion, ontology linking, and tagging "
@@ -49,54 +45,25 @@ MODULE_PURPOSE = (
 )
 
 
-# ---------------------------------------------------------------------------
-# RUN BANNER
-# ---------------------------------------------------------------------------
 def print_run_banner(enabled_steps: List[str]) -> None:
-    """
-    Print a structured, pretty banner for the ETL run.
-
-    Shows:
-      - Run ID
-      - UTC Timestamp
-      - Enabled ETL modules
-    """
-
     now = datetime.datetime.utcnow()
     banner = [
         "\n===============================================================",
-        f"  MEAL-TAXONOMY ETL RUN",
+        "  MEAL-TAXONOMY ETL RUN",
         f"  Run ID       : {LOG_RUN_ID}",
         f"  UTC Time     : {now.strftime('%Y-%m-%d %H:%M:%S')}",
         "  Enabled Steps:",
     ]
     for step in enabled_steps:
         banner.append(f"    • {step}")
-
     banner.append("===============================================================\n")
     print("\n".join(banner))
 
 
-# ---------------------------------------------------------------------------
-# MAIN ETL SEQUENCE
-# ---------------------------------------------------------------------------
-def run_etl(args):
-    """
-    Execute the ETL pipeline in the desired order.
+def run_etl(args) -> None:
+    steps_run: List[str] = []
 
-    Steps (toggleable via CLI flags):
-        1. Kaggle ingestion of multiple CSVs
-        2. Legacy Indian Kaggle ingestion
-        3. FoodOn linking
-        4. Ingredient category tagging
-        5. Kaggle ontology import
-    """
-
-    steps_run = []
-
-    # ------------------------------
-    # Step 1 — Kaggle ingestion
-    # ------------------------------
+    # Kaggle
     if args.kaggle:
         steps_run.append("Kaggle ingestion")
         log_info(
@@ -114,14 +81,12 @@ def run_etl(args):
                 module_purpose=MODULE_PURPOSE,
                 invoking_function="run_etl",
                 invoking_purpose="Unified ETL execution flow",
-                next_step="Abort or continue depending on flags",
-                resolution="Fix Kaggle CSV formats / loader configuration",
+                next_step="Fix CSV or loader, then rerun.",
+                resolution="Inspect error and Kaggle CSV formats.",
                 exc=exc,
             )
 
-    # ------------------------------
-    # Step 2 — Legacy Indian CSV
-    # ------------------------------
+    # Legacy Indian
     if args.indian:
         steps_run.append("Indian Kaggle ingestion")
         log_info(
@@ -129,7 +94,7 @@ def run_etl(args):
             module_purpose=MODULE_PURPOSE,
             invoking_function="run_etl",
             invoking_purpose="Unified ETL execution flow",
-            next_step="Call ingest_indian_kaggle(...)",
+            next_step="Call ingest_indian_kaggle('data/indian_food.csv')",
         )
         try:
             ingest_indian_kaggle("data/indian_food.csv")
@@ -139,14 +104,12 @@ def run_etl(args):
                 module_purpose=MODULE_PURPOSE,
                 invoking_function="run_etl",
                 invoking_purpose="Unified ETL execution flow",
-                next_step="Skip this dataset or fix CSV",
-                resolution="Check CSV format / ingestion code",
+                next_step="Skip this dataset or fix CSV.",
+                resolution="Check CSV format / data issues.",
                 exc=exc,
             )
 
-    # ------------------------------
-    # Step 3 — FoodOn linking
-    # ------------------------------
+    # FoodOn
     if args.foodon:
         steps_run.append("FoodOn synonyms import")
         log_info(
@@ -154,7 +117,7 @@ def run_etl(args):
             module_purpose=MODULE_PURPOSE,
             invoking_function="run_etl",
             invoking_purpose="Unified ETL execution flow",
-            next_step="Call foodon_import.main()",
+            next_step="Call foodon_main()",
         )
         try:
             foodon_main()
@@ -164,18 +127,16 @@ def run_etl(args):
                 module_purpose=MODULE_PURPOSE,
                 invoking_function="run_etl",
                 invoking_purpose="Unified ETL execution flow",
-                next_step="Abort or continue",
-                resolution="Check TSV format or Supabase ontology tables",
+                next_step="Inspect TSV and ontology tables.",
+                resolution="Fix TSV or DB schema and rerun.",
                 exc=exc,
             )
 
-    # ------------------------------
-    # Step 4 — Ingredient category tags
-    # ------------------------------
+    # Ingredient categories
     if args.category:
         steps_run.append("Ontology-based ingredient categories")
         log_info(
-            "Starting ingredient_category derivation (ontology → tags)",
+            "Starting ingredient_category derivation",
             module_purpose=MODULE_PURPOSE,
             invoking_function="run_etl",
             invoking_purpose="Unified ETL execution flow",
@@ -189,18 +150,16 @@ def run_etl(args):
                 module_purpose=MODULE_PURPOSE,
                 invoking_function="run_etl",
                 invoking_purpose="Unified ETL execution flow",
-                next_step="Review ontology_relations or FoodOn config",
-                resolution="Fix ontology mappings or add missing FoodOn nodes",
+                next_step="Check ontology_relations / FoodOn config.",
+                resolution="Fix mappings and rerun.",
                 exc=exc,
             )
 
-    # ------------------------------
-    # Step 5 — Kaggle ontology import
-    # ------------------------------
+    # Kaggle ontology
     if args.kaggle_onto:
         steps_run.append("Kaggle ontology import")
         log_info(
-            "Starting Kaggle ontology import (region/course/diet → ontology_nodes)",
+            "Starting Kaggle ontology import",
             module_purpose=MODULE_PURPOSE,
             invoking_function="run_etl",
             invoking_purpose="Unified ETL execution flow",
@@ -214,26 +173,20 @@ def run_etl(args):
                 module_purpose=MODULE_PURPOSE,
                 invoking_function="run_etl",
                 invoking_purpose="Unified ETL execution flow",
-                next_step="Check meals.meta and Kaggle datasets",
-                resolution="Fix inconsistent metadata or rerun ingestion",
+                next_step="Check meals.meta and Kaggle datasets.",
+                resolution="Fix metadata inconsistencies and rerun.",
                 exc=exc,
             )
 
-    # ------------------------------
-    # End of ETL
-    # ------------------------------
     log_info(
         f"ETL run completed. Steps executed: {', '.join(steps_run)}",
         module_purpose=MODULE_PURPOSE,
         invoking_function="run_etl",
         invoking_purpose="Unified ETL execution flow",
-        next_step="Exit script or chain into next pipeline stage",
+        next_step="Exit script or start next pipeline stage.",
     )
 
 
-# ---------------------------------------------------------------------------
-# CLI ENTRYPOINT
-# ---------------------------------------------------------------------------
 def parse_args():
     parser = argparse.ArgumentParser(description="Unified Meal Taxonomy ETL Runner")
     parser.add_argument("--kaggle", action="store_true", help="Run Kaggle ingestion")
@@ -247,7 +200,6 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
 
-    # Build banner BEFORE structured logs start
     enabled_steps = [
         s for s, enabled in [
             ("Kaggle ingestion", args.kaggle),
@@ -259,5 +211,4 @@ if __name__ == "__main__":
     ]
 
     print_run_banner(enabled_steps)
-
     run_etl(args)
