@@ -16,7 +16,9 @@ from typing import Dict
 from supabase import Client
 
 from src.meal_taxonomy.config import get_supabase_client
-from src.meal_taxonomy.logging_utils import log_info, log_error
+from src.meal_taxonomy.logging_utils import get_logger
+
+logger = get_logger("taxonomy_seed")
 
 MODULE_PURPOSE = "Seed initial tag_types and tags for the meal taxonomy."
 
