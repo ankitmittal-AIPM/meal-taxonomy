@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 taxonomy_seed.py
 
@@ -9,8 +10,6 @@ Purpose:
 Usage:
     python -m meal_taxonomy.taxonomy.taxonomy_seed
 """
-
-from __future__ import annotations
 
 from typing import Dict
 from supabase import Client

@@ -1,3 +1,4 @@
+from __future__ import annotations
 # ontologies.py
 """"
 Module to map ingredients to FoodOn ontology terms.
@@ -18,9 +19,6 @@ Once you’re comfortable, you can:
 Download foodon.owl or foodon-synonyms.tsv from the FoodOn GitHub repo
 Use rdflib to search by label, and build this mapping automatically instead of manually.
 """
-
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Dict, Optional, List, Tuple
 

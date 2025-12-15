@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 ETL pipeline for meals:
 1. Upsert meal
@@ -8,8 +9,6 @@ ETL pipeline for meals:
    c. ontology mappings
 4. Attach tags via meal_tags
 """
-
-from __future__ import annotations
 
 import logging
 from typing import Dict, List

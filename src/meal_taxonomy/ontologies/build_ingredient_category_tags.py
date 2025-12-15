@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 build_ingredient_category_tags.py
 
@@ -19,7 +20,6 @@ Logging:
     <InvokingFunc>|<InvokingFuncPurpose>|<Detail>|<NextStep>|<Resolution>|<END>
 """
 
-from __future__ import annotations
 from typing import Dict, Set, List
 
 from src.meal_taxonomy.config import get_supabase_client

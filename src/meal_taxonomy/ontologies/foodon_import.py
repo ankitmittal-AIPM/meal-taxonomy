@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 foodon_import.py
 
@@ -21,8 +22,6 @@ Usage:
         - SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set in your env (.env).
         - data/foodon-synonyms.tsv exists and is the FoodOn synonyms file.
 """
-
-from __future__ import annotations
 
 from pathlib import Path
 

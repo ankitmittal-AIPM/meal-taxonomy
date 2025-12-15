@@ -1,3 +1,4 @@
+from __future__ import annotations
 # Kaggle_Loader/kaggle_unified.py
 
 """
@@ -11,10 +12,6 @@ Because pipeline.dataset_tags() already expects these meta keys, it will:
 1. Create tags under existing tag types like diet, cuisine_region, meal_type, taste_profile.
 2. Not create any new tag_type names, so no duplicates there.
 """
-
-
-from __future__ import annotations
-
 from typing import Dict, List, Optional
 import os
 

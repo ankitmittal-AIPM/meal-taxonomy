@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 config.py
 
@@ -8,7 +9,7 @@ Purpose:
 Usage:
     from meal_taxonomy.config import get_supabase_client
 """
-from __future__ import annotations
+
 import os       # os module to read environment variables
 
 # Supabase client setup where env vars are used for configuration. Client connection details are not hardcoded.

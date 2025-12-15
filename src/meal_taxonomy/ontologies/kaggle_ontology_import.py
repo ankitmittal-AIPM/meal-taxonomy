@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 kaggle_ontology_import.py
 
@@ -13,9 +14,6 @@ Why:
 Logging:
     Structured logs via logging_utils.get_logger()
 """
-
-from __future__ import annotations
-
 from typing import Dict, Set
 from src.meal_taxonomy.config import get_supabase_client
 from src.meal_taxonomy.taxonomy.taxonomy_seed import ensure_tag_type, ensure_tag

@@ -1,4 +1,5 @@
 
+from __future__ import annotations
 # To keep things beginner-friendly, let’s start with a stub NLP that only does time bucketing and later you can plug the full TASTEset model.
 # Once the base pipeline works, we can upgrade this to the full transformers-based version.
 
@@ -32,8 +33,6 @@ Still uses NER where possible, but treats it as an extra layer.
 # nlp_tagging.py
 
 # nlp_tagging.py
-
-from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Optional, Sequence

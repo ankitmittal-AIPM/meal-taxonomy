@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 ingest_kaggle_all.py
 
@@ -9,8 +10,6 @@ Usage:
     from meal_taxonomy.etl.ingest_kaggle_all import ingest_folder
     ingest_folder("data/kaggle")
 """
-
-from __future__ import annotations
 
 import glob
 import os
