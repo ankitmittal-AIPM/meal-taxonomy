@@ -8,7 +8,8 @@ import os
 from src.meal_taxonomy.config import get_supabase_client
 from etl.pipeline import MealETL
 from datasets.kaggle_unified import load_kaggle_csv
-from logger_utils import get_logger
+from meal_taxonomy.logging_utils import log_info, log_warning, log_error
+
 
 logger = get_logger("ingest_kaggle_all")
 
