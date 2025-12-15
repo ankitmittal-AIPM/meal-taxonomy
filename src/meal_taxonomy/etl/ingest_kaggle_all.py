@@ -102,23 +102,54 @@ def ingest_folder(folder: str = "data/kaggle") -> None:
             },
         )
 
+        # Milestone logging: Log only 5 error rows per dataset to avoid log flooding
+        max_consecutive_failures = 5
+        consecutive_failures = 0
+
         for idx, rec in enumerate(recipes):
             try:
                 etl.ingest_recipe(rec, index=idx)
+                consecutive_failures = 0
             except Exception as exc:  # noqa: BLE001
-                logger.error(
-                    "Error ingesting recipe '%s' from dataset '%s': %s",
-                    rec.title,
-                    dataset_name,
-                    exc,
-                    extra={
-                        "invoking_func": "ingest_folder",
-                        "invoking_purpose": "Batch ingest all Kaggle CSV files in a folder",
-                        "next_step": "Skip this recipe and continue",
-                        "resolution": "Inspect this recipe's data / DB constraints",
-                    },
-                    exc_info=True,
-                )
+                consecutive_failures += 1
+
+                extra = {
+                    "invoking_func": "ingest_folder",
+                    "invoking_purpose": "Batch ingest all Kaggle CSV files in a folder",
+                    "next_step": "Skip this recipe and continue, unless there are many consecutive failures",
+                    "resolution": "Inspect this recipe's data / DB constraints",
+                }
+
+                if consecutive_failures == 1:
+                    # First failure for this dataset: keep traceback
+                    logger.error(
+                        "Error ingesting recipe '%s' from dataset '%s': %s",
+                        rec.title,
+                        dataset_name,
+                        exc,
+                        extra=extra,
+                        exc_info=True,
+                    )
+                else:
+                    logger.error(
+                        "Error ingesting recipe '%s' from dataset '%s' "
+                        "[consecutive failure %d]: %s",
+                        rec.title,
+                        dataset_name,
+                        consecutive_failures,
+                        exc,
+                        extra=extra,
+                    )
+                # Alert on too many consecutive failures
+                if consecutive_failures >= max_consecutive_failures:
+                    logger.error(
+                        "Aborting ingestion for dataset '%s' after %d consecutive "
+                        "failures (likely systemic issue such as Supabase outage).",
+                        dataset_name,
+                        max_consecutive_failures,
+                        extra=extra,
+                    )
+                    break
 
         total_recipes += len(recipes)
 

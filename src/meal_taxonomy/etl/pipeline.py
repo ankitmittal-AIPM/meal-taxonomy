@@ -8,6 +8,15 @@ ETL pipeline for meals:
    b. NLP (NER + time buckets)
    c. ontology mappings
 4. Attach tags via meal_tags
+
+Tag Flow in pipeline:
+a. generate_dataset_tag_candidates creates tags from metadata (diet, region, course, flavor_profile + Indian contexts).
+b. generate_tag_candidates_for_recipe adds NLP-based tags.
+c. merge_tag_candidates dedupes by (tag, source) with max confidence and then attach_tags_to_recipe writes into recipe_tags.
+
+Logging in loops:
+a. Info-level logging is only per-100 recipes in ETLPipeline.ingest_dataset, which is good for large runs.
+b. Per-recipe and per-ingredient logging is at DEBUG level, so it won’t flood logs in normal production. Good.
 """
 
 import logging
@@ -46,6 +55,35 @@ class MealETL:
         self.tag_type_cache: Dict[str, int] = {}
         self.tag_cache: Dict[tuple[int, str], str] = {}
 
+    # -----------------------------------------------------
+    # Safe bulk upsert with fallback
+    # Tries bulk .upsert(rows)
+    # If the exception message mentions “parallel”, “multiple”, or “bulk”, falls back to inserting one row at a time (no schema changes, just safer behavior)
+    # -----------------------------------------------------
+    def _safe_bulk_upsert(self, table: str, rows: list[dict]) -> None:
+        """
+        Try bulk upsert, but fall back to row-by-row upsert if the Supabase
+        instance doesn't support multi-row / parallel inserts.
+
+        This avoids repeated noisy errors like "multi parallel insert not
+        supported" and keeps logs manageable.
+        """
+        if not rows:
+            return
+
+        try:
+            # Preferred: single bulk upsert
+            self.client.table(table).upsert(rows).execute()
+        except Exception as exc:  # noqa: BLE001
+            msg = str(exc).lower()
+            if "parallel" in msg or "multiple" in msg or "bulk" in msg:
+                # Conservative fallback: one row at a time
+                for row in rows:
+                    self.client.table(table).upsert(row).execute()
+            else:
+                # Not the known bulk-insert limitation -> bubble up
+                raise
+    
     # -----------------------------------------------------
     # Tag helpers
     # -----------------------------------------------------
@@ -157,6 +195,13 @@ class MealETL:
 
         if rows:
             self.client.table("meal_ingredients").upsert(rows).execute()
+
+        # Safe bulk upsert version
+        rows: list[dict] = []
+        # populate rows exactly as before
+
+        if rows:
+            self._safe_bulk_upsert("meal_ingredients", rows)
 
     # -----------------------------------------------------
     # Tag extraction
@@ -271,6 +316,21 @@ class MealETL:
         if rows:
             self.client.table("meal_tags").upsert(rows).execute()
 
+        # Safe bulk upsert version
+        rows = [
+            {
+                "meal_id": meal_id,
+                "tag_type": tc.tag_type,
+                "tag_value": tc.value,
+                "source": tc.source,
+            }
+            for tc in candidates
+        ]
+
+        if rows:
+            self._safe_bulk_upsert("meal_tags", rows)
+
+
     # -----------------------------------------------------
     # Main recipe ingestion
     # -----------------------------------------------------
@@ -305,64 +365,84 @@ class MealETL:
 # Batch ingestion
 # ---------------------------------------------------------
 def ingest_indian_kaggle(path: str) -> None:
+    """
+    Convenience function for CLI: load Kaggle file + ingest.
+    """
     client = get_supabase_client()
     etl = MealETL(client)
     recipes = load_indian_kaggle_csv(path)
-    # Limiting to first 20 for testing only
-    #recipes = recipes[:20]  # limit for testing for first 20 recipes
 
-    #logger.warning(f"Starting ingestion of {len(recipes)} recipes...")
-    
     logger.info(
-        "Starting ingestion of %d recipes from '%s'",
+        "Starting ingestion of %d recipes from %s",
         len(recipes),
         path,
         extra={
             "invoking_func": "ingest_indian_kaggle",
-            "invoking_purpose": "Batch ingest legacy Indian Kaggle CSV via MealETL",
-            "next_step": "Loop over RecipeRecord objects and ingest them",
+            "invoking_purpose": "Ingest Kaggle Indian recipes CSV",
+            "next_step": "Iterate recipes and upsert into meals / ingredients / meal_ingredients / meal_tags",
             "resolution": "",
         },
     )
+
+    max_consecutive_failures = 5
+    consecutive_failures = 0
 
     for idx, rec in enumerate(recipes):
         try:
             etl.ingest_recipe(rec, index=idx)
-        except Exception as exc:
-            # Only errors go to logs
-            #logger.error(
-            #    f"Failed to ingest recipe '{rec.title}' (ID={rec.external_id}): {exc}",
-            #    exc_info=True,
-            #)
-            # New Log structure
-            logger.error(
-                "Failed to ingest recipe '%s' (external_id=%s): %s",
-                rec.title,
-                rec.external_id,
-                exc,
-                extra={
-                    "invoking_func": "ingest_indian_kaggle",
-                    "invoking_purpose": "Batch ingest legacy Indian Kaggle CSV via MealETL",
-                    "next_step": "Skip this recipe and continue with next one",
-                    "resolution": "Inspect this recipe row and Supabase constraints; fix data or schema and rerun if needed",
-                },
-                exc_info=True,
-            )
+            consecutive_failures = 0
+        except Exception as exc:  # noqa: BLE001
+            consecutive_failures += 1
 
-    #logger.warning("Ingestion completed successfully.")
-    # New logs structure
+            extra = {
+                "invoking_func": "ingest_indian_kaggle",
+                "invoking_purpose": "Ingest Kaggle Indian recipes CSV",
+                "next_step": "Inspect first failing record and Supabase response; fix schema or mapping; rerun ETL",
+                "resolution": "",
+            }
+
+            if consecutive_failures == 1:
+                # First failure: keep full traceback for debugging
+                logger.error(
+                    "Error ingesting recipe '%s' (external_id=%s)",
+                    rec.title,
+                    rec.external_id,
+                    exc_info=True,
+                    extra=extra,
+                )
+            else:
+                # Subsequent failures: shorter log line, no stack trace
+                logger.error(
+                    "Error ingesting recipe '%s' (external_id=%s) "
+                    "[consecutive failure %d]: %s",
+                    rec.title,
+                    rec.external_id,
+                    consecutive_failures,
+                    exc,
+                    extra=extra,
+                )
+
+            if consecutive_failures >= max_consecutive_failures:
+                logger.error(
+                    "Aborting ingestion after %d consecutive failures. "
+                    "This usually indicates a systemic issue (e.g. Supabase "
+                    "connectivity or schema mismatch).",
+                    max_consecutive_failures,
+                    extra=extra,
+                )
+                break
+
     logger.info(
-        "Ingestion completed for %d recipes from '%s'",
+        "Finished ingestion of %d recipes from %s",
         len(recipes),
         path,
         extra={
             "invoking_func": "ingest_indian_kaggle",
-            "invoking_purpose": "Batch ingest legacy Indian Kaggle CSV via MealETL",
-            "next_step": "Exit script",
+            "invoking_purpose": "Ingest Kaggle Indian recipes CSV",
+            "next_step": "Exit",
             "resolution": "",
         },
     )
-
 
 if __name__ == "__main__":
     ingest_indian_kaggle("data/indian_food.csv")

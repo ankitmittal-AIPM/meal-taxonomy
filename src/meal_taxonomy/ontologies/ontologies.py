@@ -1,6 +1,6 @@
 from __future__ import annotations
 # ontologies.py
-""""
+"""
 Module to map ingredients to FoodOn ontology terms.
 Full, automated FoodOn integration is a big topic (FoodOn has ~40k classes).
 For now, you want something pragmatic:
