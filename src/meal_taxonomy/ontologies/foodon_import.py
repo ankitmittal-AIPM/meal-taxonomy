@@ -2,11 +2,11 @@ from __future__ import annotations
 """
 foodon_import.py
 
-Purpose:
+A. Purpose:
     Utility script to link your ingredients to FoodOn ontology terms,
     using the FoodOn synonyms TSV file.
 
-High-level behaviour:
+B. High-level behaviour:
     - Reads all ingredients from Supabase.
     - Uses ontologies.link_ingredients_via_foodon_synonyms() to:
         * match ingredient names to FoodOn terms
@@ -15,12 +15,12 @@ High-level behaviour:
         * update ingredients.ontology_term_iri / ontology_source
     - Logs progress and errors using the shared structured logging format.
 
-Usage:
+C. Usage:
     python foodon_import.py
 
-    Make sure:
-        - SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set in your env (.env).
-        - data/foodon-synonyms.tsv exists and is the FoodOn synonyms file.
+D. Assumptions:
+    - SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set in your env (.env).
+    - data/foodon-synonyms.tsv exists and is the FoodOn synonyms file.
 """
 
 from pathlib import Path
@@ -31,11 +31,9 @@ from src.meal_taxonomy.logging_utils import get_logger
 # Module-level logger with structured formatting
 logger = get_logger("foodon_import")
 
-
 def main() -> None:
     """
     Entry point for FoodOn import script.
-
     Steps:
         1) Resolve path to foodon-synonyms.tsv.
         2) Validate that the file exists.

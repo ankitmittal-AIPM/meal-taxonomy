@@ -52,7 +52,8 @@ class OntologyLink:
 
 
 # Example subset mapping – you will grow this over time.
-# IRIs below are placeholders: look up real FoodOn IRIs via Ontobee / OLS. 
+# IRIs below are placeholders: look up real FoodOn IRIs via Ontobee / OLS.
+# TO DO - Expand this mapping as needed. and Make is more automated later just the way we did build_ingredient_category_tags.py for Category Root Tags
 FOODON_INGREDIENT_MAPPING: Dict[str, OntologyLink] = {
     # "local ingredient name" : OntologyLink("FOODON_IRI", "Human readable label")
     "chickpeas": OntologyLink(
@@ -156,6 +157,9 @@ def link_all_ingredients(client: Client) -> None:
 # FoodOn integration: link ingredients to FoodOn terms using foodon-synonyms.tsv
 # -----------------------------------------------------------------------------
 
+# Main data class to get all data for Foodon from ontology_nodes table
+# Reads the TSV and returns `(term_id, text)` rows (FoodOn IRI + label+synonyms blob)
+# Invoke Address - Called from link_ingredients_via_foodon_synonyms
 def _load_foodon_synonyms(tsv_path: Path) -> List[Tuple[str, str]]:
     """
     Read FoodOn's foodon-synonyms.tsv and keep only:
@@ -170,9 +174,10 @@ def _load_foodon_synonyms(tsv_path: Path) -> List[Tuple[str, str]]:
     with tsv_path.open("r", encoding="utf-8") as f:
         reader = csv.reader(f, delimiter="\t")
         for raw in reader:
+            # Skip empty or malformed rows
             if not raw or len(raw) < 3:
                 continue
-
+            # Extract term_id from first column
             term_id = (raw[0] or "").strip()
             if not term_id:
                 continue
@@ -258,7 +263,8 @@ def _upsert_entity_link(
         on_conflict="entity_type,entity_id,ontology_node_id,source",
     ).execute()
 
-
+# Invoke Address - Called from foodon_import.py
+# Links all ingredients in DB to FoodOn terms using foodon-synonyms.tsv
 def link_ingredients_via_foodon_synonyms(client: Client, tsv_path: str) -> None:
     """
     Match your ingredients.name_en against the label+synonym text in
@@ -270,6 +276,21 @@ def link_ingredients_via_foodon_synonyms(client: Client, tsv_path: str) -> None:
 
     Matching is simple substring-based for now:
       normalized(ingredient_name) in lowercased(label+synonyms blob).
+
+    Here is the step by step process on How FoodOn TSV becomes “ontology data” for ingredients in Supabase
+    a. Read and load full FoodOn Synonyms TSV using _load_foodon_synonyms() and returns 
+    b. Then `link_ingredients_via_foodon_synonyms` does the real work:
+        i. **Load ingredients from DB** (`ingredients` table)
+        ii. For each ingredient name, find a matching FoodOn term using that synonyms text.
+        iii. For every match, it:
+            - Ensures a row in `ontology_nodes` for that FoodOn IRI (`_upsert_foodon_node`)
+            - Updates `ingredients.ontology_term_iri` and `ingredients.ontology_source = 'FoodOn'
+            - Inserts/upsserts an `entity_ontology_links` row: ingredient → FoodOn node_id
+
+    Result >> So after running the FoodOn step:
+        - **FoodOn concepts** live in DB Table: `ontology_nodes` (with `iri`, `label`, `source='FoodOn'`, `kind=...`) 
+        - **Ingredient ↔ FoodOn links** live in DB Table: `entity_ontology_links` (entity_type='ingredient', entity_id, ontology_node_id, source='FoodOn')  
+        No external API call is happening at runtime – you’re using FoodOn *offline* via that TSV file + these Supabase tables.
     """
     path = Path(tsv_path)
     if not path.exists():
@@ -285,6 +306,9 @@ def link_ingredients_via_foodon_synonyms(client: Client, tsv_path: str) -> None:
         )
         return
 
+    # Step 1 - Get full data from TSV
+    # Retrieve full list of FoodOn data in id and text blob form
+    # Reads the TSV and returns `(term_id, text)` rows (FoodOn IRI + label+synonyms blob)
     synonyms_rows = _load_foodon_synonyms(path)
     if not synonyms_rows:
         logger.warning(
@@ -298,6 +322,7 @@ def link_ingredients_via_foodon_synonyms(client: Client, tsv_path: str) -> None:
         )
         return
 
+    # Step 2 - Get complete ingredients from DB
     # Load ingredients from DB
     res = client.table("ingredients").select("id, name_en, ontology_term_iri").execute()
     ingredients = res.data or []
@@ -313,9 +338,12 @@ def link_ingredients_via_foodon_synonyms(client: Client, tsv_path: str) -> None:
         )
         return
 
-    # Build matches: ingredient_id -> FoodOn term_id
+    # Step 3 - Actual matching starts here
+    # Build matches: ingredient_id -> FoodOn term_id. Just the IDs for now.
     matches: Dict[str, str] = {}
 
+    # For each ingredient, see if its name matches any synonym blob
+    # Running loop over ingredients first to prioritize them and then over FoodOn Synonyms terms
     for ing in ingredients:
         ing_id = ing["id"]
         name_raw = ing.get("name_en") or ""
@@ -327,11 +355,14 @@ def link_ingredients_via_foodon_synonyms(client: Client, tsv_path: str) -> None:
         # to avoid overwriting manual mappings. For now, we allow override.
         # if ing.get("ontology_term_iri"):
         #     continue
-
+        
+        # Using simple substring match for now
         for term_id, blob in synonyms_rows:
             if name_norm and name_norm in blob:
                 matches[ing_id] = term_id
                 break  # take the first match
+
+        # Enhancement TO DO : you can add fuzzy matching here later if needed
 
     if not matches:
         logger.info(
@@ -347,6 +378,7 @@ def link_ingredients_via_foodon_synonyms(client: Client, tsv_path: str) -> None:
 
     linked_count = 0
 
+    # Step 4 - Apply the matches to the DB where now we have full mapping
     for ing in ingredients:
         ing_id = ing["id"]
         term_id = matches.get(ing_id)
@@ -378,12 +410,13 @@ def link_ingredients_via_foodon_synonyms(client: Client, tsv_path: str) -> None:
             entity_type="ingredient",
             entity_id=ing_id,
             ontology_node_id=node_id,
+            # TO DO : Confidence for synonym-based match. Later you can refine this by bringing in dynamic scores
             confidence=0.9,
             source="FoodOn",
         )
 
         linked_count += 1
-
+    # Successful link of ingredients to FoodOn terms/synonyms
     logger.info(
         "Linked %d ingredients to FoodOn terms using synonyms",
         linked_count,

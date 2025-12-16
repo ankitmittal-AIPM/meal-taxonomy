@@ -53,6 +53,8 @@ from src.meal_taxonomy.logging_utils import get_logger
 logger = get_logger("build_ingredient_category_tags")
 
 # --- CATEGORY ROOT START ---------------------------------------------------------
+# Invoke Address - Called from build_final_category_roots and Main in this file
+# Define root FoodOn IRIs for ingredient categories on 14 predefined ingredient categories
 def build_category_roots() -> Dict[str, str]:
     """
     Define root FoodOn IRIs for ingredient categories.
@@ -92,6 +94,8 @@ def build_category_roots() -> Dict[str, str]:
         "sweetener": "http://purl.obolibrary.org/obo/FOODON_00001059",  # sugar, jaggery
     }
 
+# Invoke Address - Called from build_final_category_roots in this file
+# Auto-discover category roots from FoodOn hierarchy
 def auto_discover_category_roots(ontology_nodes, ontology_relations, min_descendants=20):
     """
     Instead of manually specifying categories, the system can:
@@ -136,6 +140,7 @@ def auto_discover_category_roots(ontology_nodes, ontology_relations, min_descend
 
     return category_roots
 
+# Invoke Address - Called from ensure_category_tags and main in this file
 # Merge auto-discovered roots + your manual list
 def build_final_category_roots(client): 
 
@@ -147,9 +152,9 @@ def build_final_category_roots(client):
     c. Still respects your manual curation
     d. Reduces maintenance effort dramatically
     """
-    # Load FoodOn graph
+    # Load FoodOn graph or hierarchy from ontology_relations table in Supabase DB
     relations = load_foodon_hierarchy(client)
-    # To Do: load FoodOn ontology_nodes (id -> iri)
+    # Load all FoodOn ontology_nodes (id -> iri) from Supabase DB
     nodes = load_foodon_nodes(client)
 
     auto = auto_discover_category_roots(nodes, relations)
@@ -160,6 +165,8 @@ def build_final_category_roots(client):
 # --- CATEGORY ROOT ENDS ------------------------------------------------------------
 
 # --- MAIN LOGIC ---------------------------------------------------------------
+# Invoke Address - Called from main in this file
+# Ensure ingredient_category tag_type and tags exist in the DB
 def ensure_category_tags(client) -> Dict[str, str]:
     """
     Ensure tag_type 'ingredient_category' exists and create tags (legume, dairy…).
@@ -207,16 +214,31 @@ def ensure_category_tags(client) -> Dict[str, str]:
     )
     return mapping
 
+# Invoke Address - Called from build_final_category_roots in this file
+# Load all FoodOn ontology_nodes (id -> iri) from Supabase DB
+def load_foodon_nodes(client):
+    # Load FoodOn ontology_nodes (id -> iri) from Supabase DB
+    res = (
+        client.table("ontology_nodes")
+        .select("id, iri, label, kind")
+        .eq("source", "FoodOn")
+        .execute()
+    )
+    return res.data or []
 
+# Invoke Address - Called from build_final_category_roots and Main in this file
+# Returns FoodOn Hierarchy as parent -> children mapping from ontology_relations Table in Supabase DB
 def load_foodon_hierarchy(client):
     """
-    Load FoodOn is_a relationships stored in ontology_relations.
+    Load FoodOn "is_a" relationships stored in ontology_relations.
 
+    **Hierarchy**: This module reads `ontology_relations` where `source='FoodOn'` 
+    and `predicate='is_a'` and builds a parent → children mapping
     Returns:
         dict: parent_id -> set(child_ids)
     """
     logger.info(
-        "Loading FoodOn hierarchy from ontology_relations",
+        "Loading FoodOn hierarchy from ontology_relations in the Supabase DB",
         extra={
             "invoking_func": "load_foodon_hierarchy",
             "invoking_purpose": "Fetch ingredient class hierarchy from FoodOn",
@@ -224,7 +246,7 @@ def load_foodon_hierarchy(client):
             "resolution": "",
         },
     )
-
+    # Load FoodOn hierarchy from ontology_relations in the Supabase DB
     rel_res = (
         client.table("ontology_relations")
         .select("subject_id, object_id")
@@ -234,18 +256,20 @@ def load_foodon_hierarchy(client):
     )
 
     parent_to_children: Dict[str, Set[str]] = {}
+    # Build parent -> children mapping where Object is parent, Subject is child
     for rec in rel_res.data or []:
         parent_to_children.setdefault(rec["object_id"], set()).add(rec["subject_id"])
 
     return parent_to_children
 
-
+# Invoke Address - Called from map_ingredients_to_categories
+# Build all descendant nodes for a given root node in the ontology hierarchy
 def build_descendants(root_id: str, parent_tree: Dict[str, Set[str]]) -> Set[str]:
     """
-    DFS over ontology hierarchy to find descendant nodes.
+    DFS i.e. Depth-First Search over ontology hierarchy to find descendant nodes.
     """
     seen: Set[str] = set()
-
+    # Defining depth-first search function that traverses the tree and collects descendants
     def dfs(nid: str):
         if nid in seen:
             return
@@ -256,22 +280,28 @@ def build_descendants(root_id: str, parent_tree: Dict[str, Set[str]]) -> Set[str
     dfs(root_id)
     return seen
 
-
+# Invoke Address - Called from main in this file
+# Map ingredients to categories based on FoodOn hierarchy
 def map_ingredients_to_categories(client, category_roots, hierarchy):
     """
-    Map ingredient_id -> set(category_values)
-    based on FoodOn ontology links.
+    Map ingredient_id -> set(category_values) based on FoodOn ontology links
+    - Loads all FoodOn nodes from `ontology_nodes` (`iri` → `id`) Table in Supabase DB
+    - For each category root IRI (legume, dairy, etc.), finds its node_id, walks all descendants with `build_descendants`, and builds a set of all child node_ids per category
+    - Reads `entity_ontology_links` for ingredients and marks an ingredient as belonging to a category if its `ontology_node_id` sits under that root
+
     """
-    # Load FoodOn ontology_nodes (iri -> id)
+    # Load all FoodOn ontology_nodes (iri -> id) from Supabase DB
     node_res = (
         client.table("ontology_nodes")
         .select("id, iri")
         .eq("source", "FoodOn")
         .execute()
     )
+    # Build IRI -> id mapping
     iri_to_id = {row["iri"]: row["id"] for row in node_res.data or []}
 
     cat_to_descendants: Dict[str, Set[str]] = {}
+    # For each category root, build its descendant node IDs list. This will be matched against ingredient links next
     for cat, root_iri in category_roots.items():
         root_id = iri_to_id.get(root_iri)
         if not root_id:
@@ -291,7 +321,7 @@ def map_ingredients_to_categories(client, category_roots, hierarchy):
         descendants = build_descendants(root_id, hierarchy)
         cat_to_descendants[cat] = descendants
 
-    # Load ingredient→FoodOn links
+    # Load all ingredient→FoodOn links from entity_ontology_links Table in Supabase DB
     link_res = (
         client.table("entity_ontology_links")
         .select("entity_id, ontology_node_id")
@@ -300,11 +330,11 @@ def map_ingredients_to_categories(client, category_roots, hierarchy):
         .execute()
     )
     ingredient_to_cats: Dict[str, Set[str]] = {}
-
+    # For each ingredient link, see which category roots it falls under
     for rec in link_res.data or []:
         ing_id = rec["entity_id"]
         node_id = rec["ontology_node_id"]
-
+        # Check each category to see if this node_id is a descendant
         for cat_value, node_ids in cat_to_descendants.items():
             if node_id in node_ids:
                 ingredient_to_cats.setdefault(ing_id, set()).add(cat_value)
@@ -322,14 +352,18 @@ def map_ingredients_to_categories(client, category_roots, hierarchy):
 
     return ingredient_to_cats
 
-
+# Invoke Address - Called from main in this file
+# Propagate ingredient categories to meals via meal_ingredients
 def propagate_categories_to_meals(client, ingredient_to_cats, tag_ids_by_value):
     """
     For each meal, apply ingredient_category tags based on ingredient categories.
+    **Meals → categories**: This module looks at `meal_ingredients` and maps meals to the combined categories of their ingredients, and writes to `meal_tags`
     """
+    # Loads all meal_ingredients from Supabase DB
     mi_res = client.table("meal_ingredients").select("meal_id, ingredient_id").execute()
 
     meal_to_cats: Dict[str, Set[str]] = {}
+    # For each meal_ingredient, look up ingredient categories and aggregate it to meal level
     for rec in mi_res.data or []:
         meal_id = rec["meal_id"]
         ing_id = rec["ingredient_id"]
@@ -353,6 +387,7 @@ def propagate_categories_to_meals(client, ingredient_to_cats, tag_ids_by_value):
         return
 
     rows = []
+    # For each meal and its categories, prepare meal_tags upsert rows in Supabase DB
     for meal_id, cats in meal_to_cats.items():
         for cat_value in cats:
             tag_id = tag_ids_by_value.get(cat_value)
@@ -362,6 +397,7 @@ def propagate_categories_to_meals(client, ingredient_to_cats, tag_ids_by_value):
                 {
                     "meal_id": meal_id,
                     "tag_id": tag_id,
+                    # TO DO: You can refine confidence later based on ingredient prominence
                     "confidence": 0.9,
                     "is_primary": False,
                     "source": "ontology",
@@ -381,7 +417,7 @@ def propagate_categories_to_meals(client, ingredient_to_cats, tag_ids_by_value):
         },
     )
 
-
+# This is the main function that orchestrates the entire process
 def main():
     """
     Orchestrates category-tag derivation:
