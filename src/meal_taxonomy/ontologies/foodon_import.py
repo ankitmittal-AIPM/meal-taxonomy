@@ -24,11 +24,9 @@ Usage:
 """
 
 from pathlib import Path
-
 from src.meal_taxonomy.config import get_supabase_client
 from src.meal_taxonomy.ontologies.ontologies import link_ingredients_via_foodon_synonyms
 from src.meal_taxonomy.logging_utils import get_logger
-
 
 # Module-level logger with structured formatting
 logger = get_logger("foodon_import")

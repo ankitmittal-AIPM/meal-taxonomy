@@ -193,13 +193,7 @@ class MealETL:
                 }
             )
 
-        if rows:
-            self.client.table("meal_ingredients").upsert(rows).execute()
-
-        # Safe bulk upsert version
-        rows: list[dict] = []
-        # populate rows exactly as before
-
+        # Use the generic safe bulk upsert helper
         if rows:
             self._safe_bulk_upsert("meal_ingredients", rows)
 
@@ -314,21 +308,7 @@ class MealETL:
                 }
             )
         if rows:
-            self.client.table("meal_tags").upsert(rows).execute()
-
-        # Safe bulk upsert version
-        rows = [
-            {
-                "tag_id": tag_id[(tc.tag_type, tc.value)],  # or whatever your key is
-                "source": tc.source or source or "unknown",
-                "confidence": tc.confidence,
-                "meal_id": meal_id,
-                "is_primary": tc.is_primary,
-            }
-            for tc in candidates
-        ]
-
-        if rows:
+            # Use the generic safe bulk upsert helper
             self._safe_bulk_upsert("meal_tags", rows)
 
 

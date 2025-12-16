@@ -28,7 +28,6 @@ from pathlib import Path
 from supabase import Client
 from src.meal_taxonomy.logging_utils import get_logger
 
-
 logger = get_logger("ontologies")
 
 # This module starts with a simple hard-coded mapping.
