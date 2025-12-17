@@ -155,7 +155,8 @@ def import_foodon_graph(ontology_path: str, namespace_filter: str | None = None)
         batch = relations_to_insert[i : i + BATCH_SIZE]
         print(f"Inserting relations {i}–{i+len(batch)-1}...")
         try:
-            client.table("ontology_relations").upsert(batch).execute()
+            db_response = client.table("ontology_relations").upsert(batch).execute()
+            print(f"Inserted {len(db_response.data)} relations.")
         except Exception as e:
             print(f"Error inserting batch starting at {i}: {e}")
             continue
