@@ -224,7 +224,12 @@ def load_foodon_nodes(client):
         .eq("source", "FoodOn")
         .execute()
     )
-    return res.data or []
+
+    nodes: Dict[str, str] = {}
+    for row in res.data or []:
+        nodes[row["id"]] = row["iri"]
+
+    return nodes
 
 # Invoke Address - Called from build_final_category_roots and Main in this file
 # Returns FoodOn Hierarchy as parent -> children mapping from ontology_relations Table in Supabase DB
@@ -416,6 +421,58 @@ def propagate_categories_to_meals(client, ingredient_to_cats, tag_ids_by_value):
             "resolution": "",
         },
     )
+
+from typing import Dict, Set, List, Tuple
+
+# 
+def debug_show_auto_roots(
+    client,
+    min_descendants: int = 20,
+    limit: int = 30,
+) -> None:
+    """
+    Print top auto-discovered FoodOn category roots with their descendant counts.
+
+    This does NOT change any data. It's just for inspection.
+    """
+
+    parent_to_children = load_foodon_hierarchy(client)   # parent_id -> set(child_ids)
+    nodes = load_foodon_nodes(client)                    # node_id   -> iri
+
+    def count_descendants(node_id: str) -> int:
+        visited: Set[str] = set()
+        stack: List[str] = [node_id]
+
+        while stack:
+            nid = stack.pop()
+            if nid in visited:
+                continue
+            visited.add(nid)
+            stack.extend(parent_to_children.get(nid, []))
+
+        # Exclude the node itself if you want pure descendants
+        return max(len(visited) - 1, 0)
+
+    scored: List[Tuple[str, str, int]] = []
+
+    for node_id, iri in nodes.items():
+        n_desc = count_descendants(node_id)
+        if n_desc >= min_descendants:
+            # Fallback label from IRI tail; you can replace with ontology_nodes.label later
+            label = iri.rsplit("/", 1)[-1]
+            scored.append((label, iri, n_desc))
+
+    # Sort by number of descendants (biggest “categories” first)
+    scored.sort(key=lambda x: x[2], reverse=True)
+
+    print("\n=== Auto-discovered FoodOn category roots ===")
+    print(f"(min_descendants = {min_descendants}, showing top {limit})\n")
+
+    for label, iri, n_desc in scored[:limit]:
+        print(f"- {label:40s}  | descendants: {n_desc:4d}  | {iri}")
+
+    print("\nTotal candidate roots:", len(scored))
+    print("====================================================\n")
 
 # This is the main function that orchestrates the entire process
 def main():

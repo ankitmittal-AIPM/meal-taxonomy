@@ -21,6 +21,13 @@ C. Usage:
 D. Assumptions:
     - SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set in your env (.env).
     - data/foodon-synonyms.tsv exists and is the FoodOn synonyms file.
+
+E. FoodOn synonyms TSV:
+    Column 1: FoodOn Term ID (e.g., FOODON:00001234).
+    Column 2: Parent terms (hierarchy).
+    Column 3: Preferred label (the common name) and synonyms.
+    
+    Purpose: Allows quick searching and mapping of real-world food names (like "Fuji apple") to standardized FoodOn IDs
 """
 
 from pathlib import Path
@@ -31,6 +38,7 @@ from src.meal_taxonomy.logging_utils import get_logger
 # Module-level logger with structured formatting
 logger = get_logger("foodon_import")
 
+# Main entry point. This basically inputs full FoodOn synonyms TSV path and calls the linking Ingredient to FoodOnTSV function
 def main() -> None:
     """
     Entry point for FoodOn import script.
@@ -38,8 +46,9 @@ def main() -> None:
         1) Resolve path to foodon-synonyms.tsv.
         2) Validate that the file exists.
         3) Create Supabase client.
-        4) Delegate work to ontologies.link_ingredients_via_foodon_synonyms().
+        4) Delegate work to ontologies.link_ingredients_via_foodon_synonyms() to link ingredients to FoodOn.
     """
+    # Foodon synonyms TSV path have FoodOn TSV file that have detailed synonyms for ingredients
     tsv_path = Path("data/foodon-synonyms.tsv")
 
     if not tsv_path.exists():
