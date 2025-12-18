@@ -43,6 +43,11 @@ LOG_RUN_ID: str = uuid.uuid4().hex[:8]
 # Alias for compatibility with scripts that use RUN_ID
 RUN_ID: str = LOG_RUN_ID
 
+# Silences log flooding of of HTTP requests lines and make Supabase/httpx less chatty
+for noisy_logger_name in ("httpx", "httpcore", "supabase_py"):
+    logging.getLogger(noisy_logger_name).setLevel(logging.WARNING)
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",

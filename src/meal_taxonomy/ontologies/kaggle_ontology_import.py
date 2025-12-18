@@ -35,6 +35,7 @@ def upsert_ontology_node(client, iri, label, source, kind) -> str:
     Returns:
         ontology_nodes.id (UUID)
     """
+    
     lookup = (
         client.table("ontology_nodes")
         .select("id")
@@ -155,6 +156,7 @@ def main() -> None:
                 exc_info=True,
             )
 
+    # Successful completion of Kaggle's Ontology Ingestion
     logger.info(
         "Kaggle ontology import complete",
         extra={

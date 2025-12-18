@@ -181,6 +181,7 @@ class RecipeNLP:
             label_en=label,
             confidence=1.0,
             is_primary=False,
+            source ="nlp_time_bucket"
         )
 
     # ------------------------------------------------------------------
@@ -214,12 +215,31 @@ class RecipeNLP:
             "low carb",
             "low-carb",
         ],
+        "jain": [
+            "jain",
+            "no onion",
+            "no garlic",
+            "without onion",
+            "without garlic",
+        ],
+        "no_onion_garlic": [
+            "no onion garlic",
+            "without onion and garlic",
+            "satvik",
+        ],
+        "eggetarian": [
+            "eggetarian",
+            "egg only",
+        ],
     }
     DIET_LABELS = {
         "vegan": "Vegan",
         "vegetarian": "Vegetarian",
         "gluten_free": "Gluten free",
         "keto": "Keto / Low carb",
+        "jain": "Jain",
+        "no_onion_garlic": "No onion / garlic",
+        "eggetarian": "Eggetarian",
     }
 
     # Taste profile keywords
@@ -424,6 +444,7 @@ class RecipeNLP:
                         label_en=self.DIET_LABELS[value],
                         confidence=0.9,
                         is_primary=value in ("vegan", "vegetarian"),
+                        source="nlp_rule_based_tag"
                     )
                 )
 
@@ -436,6 +457,7 @@ class RecipeNLP:
                         value=value,
                         label_en=self.TASTE_LABELS[value],
                         confidence=0.85,
+                        source="nlp_rule_based_tag"
                     )
                 )
 
@@ -448,6 +470,7 @@ class RecipeNLP:
                         value=value,
                         label_en=self.TECHNIQUE_LABELS[value],
                         confidence=0.85,
+                        source="nlp_rule_based_tag"
                     )
                 )
 
@@ -461,6 +484,7 @@ class RecipeNLP:
                         label_en=self.DISH_TYPE_LABELS[value],
                         confidence=0.8,
                         is_primary=(value in ("curry", "rice_dish", "snack")),
+                        source="nlp_rule_based_tag"
                     )
                 )
 
@@ -473,6 +497,7 @@ class RecipeNLP:
                         value=value,
                         label_en=self.NUTRITION_LABELS[value],
                         confidence=0.8,
+                        source="nlp_rule_based_tag"
                     )
                 )
 
@@ -504,6 +529,7 @@ class RecipeNLP:
                 label_en=text.strip(),
                 confidence=score,
                 is_primary=True,
+                source = "nlp_ner"
             )
 
         if label_norm == "TASTE":
@@ -512,6 +538,7 @@ class RecipeNLP:
                 value=value,
                 label_en=text.strip(),
                 confidence=score,
+                source = "nlp_ner"
             )
 
         if label_norm == "PROCESS":
@@ -520,6 +547,7 @@ class RecipeNLP:
                 value=value,
                 label_en=text.strip(),
                 confidence=score,
+                source = "nlp_ner"
             )
 
         if label_norm in {"PHYSICAL_QUALITY", "PHYSICALQUALITY"}:
@@ -528,6 +556,7 @@ class RecipeNLP:
                 value=value,
                 label_en=text.strip(),
                 confidence=score,
+                source = "nlp_ner"
             )
 
         if label_norm == "COLOR":
@@ -536,6 +565,7 @@ class RecipeNLP:
                 value=value,
                 label_en=text.strip(),
                 confidence=score,
+                source="nlp_ner"
             )
 
         return None
@@ -562,6 +592,7 @@ class RecipeNLP:
 
         return tags
 
+    
     # ------------------------------------------------------------------
     # Entry point used by pipeline.py
     # Purpose: Combine ingredients + extra recipe text (title, instructions) and return a richer set of TagCandidates.

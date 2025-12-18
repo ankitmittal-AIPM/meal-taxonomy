@@ -68,74 +68,81 @@ def build_category_roots() -> Dict[str, str]:
     # These cover >90% of Indian dishes semantically.
     # Supports healthy filtering, veg/non-veg detection, macro classification, allergen detection
     return {
-         # Protein / Pulses
+         # Staples/Carbs Protein / Pulses
         "legume":  "http://purl.obolibrary.org/obo/FOODON_03301500",  # pulses, beans, lentils
-        "nut":     "http://purl.obolibrary.org/obo/FOODON_03309936",  # almonds, cashews, pistachios
+        "cereal_grain": "http://purl.obolibrary.org/obo/FOODON_00001208",  # rice, wheat flour, etc.
+        "tuber":   "http://purl.obolibrary.org/obo/FOODON_00001210",  # potato, yam, sweet potato
 
         # Dairy / Animal Products
         "dairy":   "http://purl.obolibrary.org/obo/FOODON_00002453",
         "egg":     "http://purl.obolibrary.org/obo/FOODON_00002427",
+        "honey":   "http://purl.obolibrary.org/obo/FOODON_00002430",
+        "gelatin": "http://purl.obolibrary.org/obo/FOODON_03301887",
 
         # Meat Categories
         "meat":    "http://purl.obolibrary.org/obo/FOODON_00001230",
         "poultry": "http://purl.obolibrary.org/obo/FOODON_00001216",
         "fish":    "http://purl.obolibrary.org/obo/FOODON_00001215",
         "seafood": "http://purl.obolibrary.org/obo/FOODON_00001220",
+        "pork":    "http://purl.obolibrary.org/obo/FOODON_00002703",
 
-        # Staples
-        "cereal_grain": "http://purl.obolibrary.org/obo/FOODON_00001208",  # rice, wheat flour, etc.
-        "spice":        "http://purl.obolibrary.org/obo/FOODON_03303101",  # cardamom, cumin, chili
-        "herb":         "http://purl.obolibrary.org/obo/FOODON_03302724",
+        # Produce
         "vegetable":    "http://purl.obolibrary.org/obo/FOODON_00001205",
         "fruit":        "http://purl.obolibrary.org/obo/FOODON_00001206",
+        "root_vegetable": "http://purl.obolibrary.org/obo/FOODON_03302645",
+        "leafy_vegetable": "http://purl.obolibrary.org/obo/FOODON_03302644",
+        "fungi":       "http://purl.obolibrary.org/obo/FOODON_00001212",  # mushrooms
+        "seaweed":    "http://purl.obolibrary.org/obo/FOODON_03302936",
+        "sprout":    "http://purl.obolibrary.org/obo/FOODON_03302836",
 
-        # Fats / Oils / Sugars
+        # Fats / Oils / Sugars/ Flavours
         "oil_fat":   "http://purl.obolibrary.org/obo/FOODON_03302094",  # ghee, oils
+        "spice":        "http://purl.obolibrary.org/obo/FOODON_03303101",  # cardamom, cumin, chili
+        "herb":         "http://purl.obolibrary.org/obo/FOODON_03302724",
+        "nut":     "http://purl.obolibrary.org/obo/FOODON_03309936",  # almonds, cashews, pistachios
         "sweetener": "http://purl.obolibrary.org/obo/FOODON_00001059",  # sugar, jaggery
+        "beverage":  "http://purl.obolibrary.org/obo/FOODON_00002400",  # tea, coffee, juice
     }
 
 # Invoke Address - Called from build_final_category_roots in this file
 # Auto-discover category roots from FoodOn hierarchy
-def auto_discover_category_roots(ontology_nodes, ontology_relations, min_descendants=20):
+# Invoke Address - Called from build_final_category_roots in this file
+# Auto-discover category roots from FoodOn hierarchy
+def auto_discover_category_roots(ontology_nodes, parent_to_children,min_descendants: int = 20,):
     """
-    Instead of manually specifying categories, the system can:
     Automatically detect good candidate category roots by analyzing your FoodOn ontology tree.
-    This is what “smart ontology systems” do
-
     We treat any node with many descendants as a 'category root'.
 
-    NEW BEHAVIOR >>
-    i. The system looks at your existing ontology_nodes (FoodOn).
-    ii.Identifies all high-level classes (parents that have many descendants).
-    iii.Uses heuristics to pick top categories (e.g., dairy, meat, legume, herb, spice).
-    iv. Assigns them as category roots automatically.
-    v. Still allows manual overrides.
-    """
-    # Build parent-child mappings
-    child_to_parent = {child: parent for parent, child in ontology_relations}
-    parent_to_children = {}
-    # Reverse mapping of child_to_parent
-    for child, parent in child_to_parent.items():
-        parent_to_children.setdefault(parent, []).append(child)
+    Inputs:
+        ontology_nodes: dict[node_id -> iri]
+        parent_to_children: dict[parent_id -> set(child_ids)]
+        min_descendants: minimum number of descendants for a node to qualify as a category root
 
-    # Function to count descendants
-    def count_descendants(node):
+    Returns:
+        dict: category_label -> iri
+    """
+    # Function to count descendants using DFS (similar to debug_show_auto_roots)
+    def count_descendants(node_id: str) -> int:
         visited = set()
-        stack = [node]
+        stack = [node_id]
+
         while stack:
-            n = stack.pop()
-            if n in visited:
+            nid = stack.pop()
+            if nid in visited:
                 continue
-            visited.add(n)
-            stack.extend(parent_to_children.get(n, []))
-        return len(visited)
+            visited.add(nid)
+            stack.extend(parent_to_children.get(nid, []))
+
+        # Exclude the node itself to count pure descendants
+        return max(len(visited) - 1, 0)
 
     # Find nodes with many descendants
     category_roots = {}
     for node_id, iri in ontology_nodes.items():
-        descendants = count_descendants(node_id)
-        if descendants >= min_descendants:
-            label = iri.split("/")[-1]  # fallback name
+        n_desc = count_descendants(node_id)
+        if n_desc >= min_descendants:
+            # Fallback label = last part of IRI (e.g. .../legume)
+            label = iri.rsplit("/", 1)[-1]
             category_roots[label] = iri
 
     return category_roots
@@ -296,10 +303,12 @@ def map_ingredients_to_categories(client, category_roots, hierarchy):
 
     """
     # Load all FoodOn ontology_nodes (iri -> id) from Supabase DB
+    root_iris = list(category_roots.values())
     node_res = (
         client.table("ontology_nodes")
         .select("id, iri")
         .eq("source", "FoodOn")
+        .in_("iri", root_iris)
         .execute()
     )
     # Build IRI -> id mapping

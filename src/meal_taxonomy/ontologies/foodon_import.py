@@ -51,6 +51,7 @@ def main() -> None:
     # Foodon synonyms TSV path have FoodOn TSV file that have detailed synonyms for ingredients
     tsv_path = Path("data/foodon-synonyms.tsv")
 
+    # Logs if TSV file is missing in data/foodon-synonyms.tsv and exits
     if not tsv_path.exists():
         logger.error(
             "FoodOn synonyms TSV not found at '%s'",
@@ -67,6 +68,7 @@ def main() -> None:
         )
         return
 
+    # Proceeds further if TSV file found in required folder
     logger.info(
         "Starting FoodOn ingredient linking using TSV at '%s'",
         tsv_path,

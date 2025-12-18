@@ -144,7 +144,7 @@ def import_foodon_graph(ontology_path: str, namespace_filter: str | None = None)
             print(f"Collected {count} relations so far...")
 
         # Limit relational insert for testing; remove or increase as needed
-        if count >= 2000:  
+        if count >= 10000:  
             break   
 
     print(f"Total is_a relations collected: {len(relations_to_insert)}")
