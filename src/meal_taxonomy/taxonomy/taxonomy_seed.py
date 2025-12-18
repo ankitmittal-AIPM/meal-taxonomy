@@ -39,6 +39,7 @@ MODULE_PURPOSE = "Seed initial tag_types and tags for the meal taxonomy."
 #
 # Think of each key here as a “category root” in your taxonomy.
 # -----------------------------------------------------------------------------
+# TO DO : Align Category Roots at all places - Both Hardcoded and NLP Based
 TAG_TYPES: Dict[str, str] = {
     # Core roots
     "diet": "Dietary patterns and restrictions (vegan, vegetarian, Jain, gluten_free, etc.)",

@@ -14,6 +14,16 @@ Why:
 Logging:
     Structured logs via logging_utils.get_logger()
 """
+import sys
+from pathlib import Path
+# --- Make project root importable so `src.*` imports work even when this
+# --- script is executed from the `scripts/` directory.
+# TO DO : Remove this. Currently to hardcode the path for debug purpose only
+ROOT_DIR = Path(__file__).resolve().parents[3]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+# --- Ignore above for linting/static analysis tools.
+
 from typing import Dict, Set
 from src.meal_taxonomy.config import get_supabase_client
 from src.meal_taxonomy.taxonomy.taxonomy_seed import ensure_tag_type, ensure_tag

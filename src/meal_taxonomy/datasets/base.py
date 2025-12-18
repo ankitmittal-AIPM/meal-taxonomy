@@ -6,6 +6,7 @@ from typing import List, Dict, Optional
 
 
 @dataclass
+# Defining how meal will be defined and will be inserted in Supabase DB
 class RecipeRecord:
     title: str
     description: Optional[str]

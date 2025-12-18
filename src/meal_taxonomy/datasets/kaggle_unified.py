@@ -19,11 +19,14 @@ import pandas as pd
 
 from src.meal_taxonomy.datasets.base import RecipeRecord
 
-
+# Invoke Address : load_kaggle_csv call this when it reads all csv and want to normalize columns from it
+# Column Sanitization & Normalization so that different datasets with different columns carrying similar form of information is mapped to normalized column
+# TO DO: Make Column Identification and Normalization more dynamic and ML/NLP based rather than hard-coding the forms of columns into normalized one
 def _normalize_col_name(col: str) -> str:
     """
     Normalize column names so we can match them across different Kaggle datasets.
     Examples:
+      "Diet", "Diet_Type","veg_or_nonveg","is_vegetarian","is_veg" -> "diet"
       "Recipe Name" -> "recipe_name"
       "Cook-Time(min)" -> "cook_time_min"
     """
@@ -36,6 +39,7 @@ def _normalize_col_name(col: str) -> str:
 
 
 # Canonical field synonym sets (normalized)
+# Invoke Address : from load_kaggle_csv post getting right method of _normalized_col_name that it should parse to below set of dictionaries
 TITLE_COLS = {
     "name",
     "recipe_name",
@@ -110,7 +114,8 @@ TOTAL_TIME_COLS = {
     "ready_in_mins",
 }
 
-
+# Invoke Address : Called from ingest_kaggle_all.py code
+# Find relevant nomarlized column name for any un-normalized original column in dataset
 def _find_col(norm_to_orig: Dict[str, str], candidates: set[str]) -> Optional[str]:
     """
     Given a mapping of normalized -> original column names, return the original
@@ -121,7 +126,7 @@ def _find_col(norm_to_orig: Dict[str, str], candidates: set[str]) -> Optional[st
             return norm_to_orig[cand]
     return None
 
-
+# Invoke Address : Called from load_kaggle_csv code
 def _parse_int_maybe(value) -> Optional[int]:
     if value is None:
         return None
@@ -137,7 +142,7 @@ def _parse_int_maybe(value) -> Optional[int]:
     except Exception:
         return None
 
-
+# Invoke Address : Called from load_kaggle_csv code
 def _normalize_diet(raw: Optional[str], row: pd.Series) -> Optional[str]:
     """
     Try to normalize any diet-related column(s) into one of:
@@ -166,7 +171,8 @@ def _normalize_diet(raw: Optional[str], row: pd.Series) -> Optional[str]:
 
     return None
 
-
+# Invoke Address : Called from ingest_kaggle_all.py code which takes reads all kaggle csv file and then calls load_kaggle_csv
+# Gets data ready to be upserted in Supabase for Meals/Recipes from Kaggle.
 def load_kaggle_csv(path: str, dataset_name: Optional[str] = None) -> List[RecipeRecord]:
     """
     Load a Kaggle-like CSV and normalize it into a list of RecipeRecord objects.
@@ -177,15 +183,17 @@ def load_kaggle_csv(path: str, dataset_name: Optional[str] = None) -> List[Recip
     """
     if dataset_name is None:
         dataset_name = os.path.splitext(os.path.basename(path))[0]
-
+    
+    # Reads CSV from the path of each CSV provided by ingest_kaggle_all
     df = pd.read_csv(path)
-    # Normalize column names
-    norm_to_orig: Dict[str, str] = {}
+    
+    # Normalize column names from all kaggle csv files into normalized ones. Remember it doesn't change the names in csv
+    norm_to_orig: Dict[str, str] = {}   #List of all column names from the files
     for orig in df.columns:
         norm = _normalize_col_name(orig)
         norm_to_orig[norm] = orig
-
-    title_col = _find_col(norm_to_orig, TITLE_COLS)
+    
+    title_col = _find_col(norm_to_orig, TITLE_COLS)     # Search for similar list of titles as in Title_Cols and assign that name
     ingredients_col = _find_col(norm_to_orig, INGREDIENTS_COLS)
     instructions_col = _find_col(norm_to_orig, INSTRUCTIONS_COLS)
     cuisine_col = _find_col(norm_to_orig, CUISINE_COLS)
@@ -196,10 +204,12 @@ def load_kaggle_csv(path: str, dataset_name: Optional[str] = None) -> List[Recip
     cook_col = _find_col(norm_to_orig, COOK_TIME_COLS)
     total_col = _find_col(norm_to_orig, TOTAL_TIME_COLS)
 
+    # Intializes Empty RecipeRecord to be inserted in Meal DB using Pipeline.MealETL
     records: List[RecipeRecord] = []
 
+    # Parses through each record in the Kaggle Data CSV after Columns of it are normalized as per the DB requirement. This is step to read data and getting it ready to be upserted in Supabase
     for idx, row in df.iterrows():
-        # Title
+        # Title - Setting title as per the value in title_col. if no such column found in csv file then it sets that records as Receipe with some id like Recipe 132 (random id)
         title = str(row[title_col]).strip() if title_col else f"Recipe {idx}"
 
         # Ingredients
@@ -247,6 +257,8 @@ def load_kaggle_csv(path: str, dataset_name: Optional[str] = None) -> List[Recip
             "dataset_name": dataset_name,
         }
 
+        # Setting up final Meal record to be inserted in Meal DB in Supabase through Pipeline.MealETL
+        # TO DO: to see id the Recipe Record matches with Meal DB table in Supabase
         rec = RecipeRecord(
             title=title,
             description=None,

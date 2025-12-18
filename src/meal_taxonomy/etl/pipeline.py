@@ -1,9 +1,9 @@
 from __future__ import annotations
 """
-ETL pipeline for meals:
+ETL pipeline for meals: Main function called to perform below operations is ingest_recipe
 1. Upsert meal
 2. Upsert ingredients + meal_ingredients
-3. Build tags from:
+3. Build/Extract tags from:
    a. dataset metadata
    b. NLP (NER + time buckets)
    c. ontology mappings
@@ -48,6 +48,7 @@ formatter from `src.meal_taxonomy.logging_utils`.
 # ---------------------------------------------------------
 logger = get_logger("pipeline")
 
+# Class MealETL Started --->
 class MealETL:
     def __init__(self, client: Client) -> None:
         self.client = client
@@ -58,7 +59,8 @@ class MealETL:
     # -----------------------------------------------------
     # Safe bulk upsert with fallback
     # Tries bulk .upsert(rows)
-    # If the exception message mentions “parallel”, “multiple”, or “bulk”, falls back to inserting one row at a time (no schema changes, just safer behavior)
+    # If the exception message mentions “parallel”, “multiple”, or “bulk”, 
+    # falls back to inserting one row at a time (no schema changes, just safer behavior)
     # -----------------------------------------------------
     def _safe_bulk_upsert(self, table: str, rows: list[dict]) -> None:
         """
@@ -118,6 +120,8 @@ class MealETL:
     # Persistence: meals, ingredients
     # -----------------------------------------------------
     def upsert_meal(self, rec: RecipeRecord) -> str:
+        # Preparing payload to be upserted in Supabase
+        # TO DO: check if this insert the data or prepare payload at record level or batch level
         payload = {
             "title": rec.title,
             "description": rec.description,
@@ -131,6 +135,7 @@ class MealETL:
             "servings": rec.meta.get("servings"),
         }
 
+        # Perform actual DB upsert operation to enter data in Meals DB in Supabase
         res = self.client.table("meals").upsert(
             payload, on_conflict="external_source,external_id"
         ).execute()
@@ -138,7 +143,7 @@ class MealETL:
         if res.data:
             return res.data[0]["id"]
 
-        # Fallback lookup
+        # Fallback lookup for upsert in Meal DB
         res = (
             self.client.table("meals")
             .select("id")
@@ -148,9 +153,24 @@ class MealETL:
         )
         return res.data[0]["id"]
 
+    # Invoked Address : From attach_ingredients
+    # This basically checks any ingredient already available in the ingredient table otherwise add one
+    # Ingredient table populates through meals addition where ingredient is listed, 
+    # searched in ingredient table and if not found then added as new record
     def get_or_create_ingredient(self, name_en: str) -> str:
         name_en = name_en.strip()
-
+        
+        # Search if ingredient already exists if so gets ingredient id and return back to calling function
+        res = (
+            self.client.table("ingredients")
+            .select("id")
+            .eq("name_en", name_en)
+            .execute()
+        )
+        if res.data:
+            return res.data[0]["id"]        
+        
+        # Fallback. Another way to search ingredient in the table. Just to double sure using "like"
         res = (
             self.client.table("ingredients")
             .select("id")
@@ -161,22 +181,15 @@ class MealETL:
         if res.data:
             return res.data[0]["id"]
 
+        # Add new ingredient if not found in previous step and returns id for new ingredient just added
         res = self.client.table("ingredients").insert(
             {"name_en": name_en}
         ).execute()
-
-        if res.data:
-            return res.data[0]["id"]
-
-        # Fallback
-        res = (
-            self.client.table("ingredients")
-            .select("id")
-            .eq("name_en", name_en)
-            .execute()
-        )
         return res.data[0]["id"]
 
+    # Invoked Address : From ingest_recipe post meal id is generated against (new or existing) single meal
+    # Attaches the ingredient to the meal in Meal Db in Supabase
+    # A meal can have list of ingredient sperated by comma or other ways
     def attach_ingredients(self, meal_id: str, ingredients: List[str]) -> None:
         rows = []
         for line in ingredients:
@@ -185,6 +198,7 @@ class MealETL:
                 continue
 
             ing_id = self.get_or_create_ingredient(clean)
+            # Preparing rows of ingredient to be added (i.e. to be attached) to a meal
             rows.append(
                 {
                     "meal_id": meal_id,
@@ -194,11 +208,15 @@ class MealETL:
             )
 
         # Use the generic safe bulk upsert helper
+        # Attaching ingredient means Adding ingredients to the meal in the meal_ingredient table
         if rows:
             self._safe_bulk_upsert("meal_ingredients", rows)
 
     # -----------------------------------------------------
-    # Tag extraction
+    # Tag extraction - Extracting/Building tags to a recipe record object
+    # Invoked Address : called from ingest_recipe post ingredient and 
+    # meals are added. Next step is to attach tags to meals but before that 
+    # relevant tags are fetched which is to be associated
     # -----------------------------------------------------
     def dataset_tags(self, rec: RecipeRecord) -> List[TagCandidate]:
         meta = rec.meta or {}
@@ -279,9 +297,6 @@ class MealETL:
 
         return tags
 
-    #def nlp_tags(self, rec: RecipeRecord) -> List[TagCandidate]:
-     #   return self.nlp.nlp_tags_for_recipe(rec.ingredients)
-
     def nlp_tags(self, rec: RecipeRecord) -> List[TagCandidate]:
         extra_parts = [
             rec.title or "",
@@ -292,7 +307,8 @@ class MealETL:
         return self.nlp.nlp_tags_for_recipe(rec.ingredients, extra_text=extra_text)
 
     # -----------------------------------------------------
-    # Tag persistence
+    # Tag persistence - Attaching Tags to the Meals in Meal_Tag Db in Supabase
+    # Invoked Address : Called from ingest_recipe post tags to a recipe in the recipe record objects are identified
     # -----------------------------------------------------
     def attach_tags(self, meal_id: str, candidates: List[TagCandidate], source: str) -> None:
         rows = []
@@ -313,15 +329,27 @@ class MealETL:
 
 
     # -----------------------------------------------------
-    # Main recipe ingestion
+    # Main recipe ingestion in Supabase DB
+    # Invoke Address: Invoked from ingest_kaggle_all which is code to 
+    # read all kaggle based datasource from data/kaggle folder and add 
+    # records in those files in Meal DBs in Supabase
     # -----------------------------------------------------
     def ingest_recipe(self, rec: RecipeRecord, index: int | None = None) -> str:
+        
+        # Step 1 - Gets meal id for the upserted record in the Supabase 
+        # after upsert_meal successfuly upsert the record in Meals Db in supabase
         meal_id = self.upsert_meal(rec)
+        
+        # Step 2 - Attaches ingredient to the meal in the Supabase DB
         self.attach_ingredients(meal_id, rec.ingredients)
 
+        # Step 3.1 - Extract Tags for the data record in Reciperecord object passed (Hardcoded Tags)
         ds_tags = self.dataset_tags(rec)
+        
+        # Step 3.2 - Extract Tags for the data record in Reciperecord object passed (NLP Based Tags)
         nlp_tags = self.nlp_tags(rec)
 
+        # Step 4 - Attach Tags to the meal Id in Supabase - First hardcoded based and then NLP based
         self.attach_tags(meal_id, ds_tags, source="dataset")
         self.attach_tags(meal_id, nlp_tags, source="nlp")
 
@@ -341,9 +369,12 @@ class MealETL:
 
         return meal_id
 
+# Class MealETL Ends --->
 
 # ---------------------------------------------------------
 # Batch ingestion
+# TO DO : Duplicate Code. Similar ingestion existings in ingest_kaggle_all 
+# just that over there it first reads csv passes through load_kaggle_csv for normalization
 # ---------------------------------------------------------
 def ingest_indian_kaggle(path: str) -> None:
     """
@@ -351,8 +382,11 @@ def ingest_indian_kaggle(path: str) -> None:
     """
     client = get_supabase_client()
     etl = MealETL(client)
+    # TO DO: Check do we need this any more. Special function to convert 
+    # weird manual recipes csv file to one readable by code before entering data in meal db
     recipes = load_indian_kaggle_csv(path)
 
+    # Ready to ingest data in Meal DB
     logger.info(
         "Starting ingestion of %d recipes from %s",
         len(recipes),
@@ -367,11 +401,15 @@ def ingest_indian_kaggle(path: str) -> None:
 
     max_consecutive_failures = 5
     consecutive_failures = 0
-
+    # Invokes pipeline.py function ingest_recipe to upsert data in Meal DBs in Supabase
+    # TO DO: This is similar to ingest_kaggle_all, see if we can purge this one
     for idx, rec in enumerate(recipes):
         try:
+            # TO DO: If this calls ingest_recipe to upsert data at record level or batch level. 
+            # TO DO: Record level is too slow look for method to insert at batch level
             etl.ingest_recipe(rec, index=idx)
             consecutive_failures = 0
+        # Long code to silence consecutive errors logs in CLI
         except Exception as exc:  # noqa: BLE001
             consecutive_failures += 1
 
@@ -426,4 +464,8 @@ def ingest_indian_kaggle(path: str) -> None:
     )
 
 if __name__ == "__main__":
+    # If pipeline.py is directly ran then batch ingestion of data from indian_food.csv is done.
+    # This is only place where batch ingestion is called for only one file
+    # For rest single record by record ingestion done through pipeline.py called from different code files
     ingest_indian_kaggle("data/indian_food.csv")
+

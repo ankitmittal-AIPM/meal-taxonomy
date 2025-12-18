@@ -13,7 +13,6 @@ Usage:
 
 import glob
 import os
-
 from src.meal_taxonomy.config import get_supabase_client
 from src.meal_taxonomy.etl.pipeline import MealETL
 from src.meal_taxonomy.datasets.kaggle_unified import load_kaggle_csv
@@ -25,13 +24,19 @@ MODULE_PURPOSE = (
 
 logger = get_logger("ingest_kaggle_all")
 
+# ---------------------------------------------------------
+# Batch ingestion - Ingest all data files/CSV files with meals in folder --> data/kaggle
+# Invoked Address - called directly from main function and runs when python ingest_kaggle_all.py file in CLI
+# ---------------------------------------------------------
 def ingest_folder(folder: str = "data/kaggle") -> None:
     client = get_supabase_client()
+    # Intializes the etl object with class as MealETL doesn't call any function now just makes it object of class MealETL in pipeline
     etl = MealETL(client)
 
     pattern = os.path.join(folder, "*.csv")
     files = sorted(glob.glob(pattern))
 
+    # No kaggle files in data/kaggle folder
     if not files:
         logger.warning(
             "No CSV files found in folder '%s'",
@@ -45,6 +50,7 @@ def ingest_folder(folder: str = "data/kaggle") -> None:
         )
         return
 
+    # some kaggle files found in the folder
     logger.info(
         "Found %d Kaggle CSV files under '%s'",
         len(files),
@@ -57,8 +63,10 @@ def ingest_folder(folder: str = "data/kaggle") -> None:
         },
     )
 
+    # intiliaze recipes
     total_recipes = 0
 
+    # parsing through files
     for fpath in files:
         dataset_name = os.path.splitext(os.path.basename(fpath))[0]
         logger.info(
@@ -73,6 +81,8 @@ def ingest_folder(folder: str = "data/kaggle") -> None:
             },
         )
 
+        # Calls kaggle_unified code where the records in csv files is stores in dataset to be upserted in Supabase
+        # load_kaggle_csv does two things - normalizes the csv columns and prepare dataset for DB
         try:
             recipes = load_kaggle_csv(fpath, dataset_name=dataset_name)
         except Exception as exc:  # noqa: BLE001
@@ -90,6 +100,7 @@ def ingest_folder(folder: str = "data/kaggle") -> None:
             )
             continue
 
+        # Ready to ingest data in Meal DB
         logger.info(
             "Ingesting %d recipes from dataset '%s'",
             len(recipes),
@@ -105,11 +116,15 @@ def ingest_folder(folder: str = "data/kaggle") -> None:
         # Milestone logging: Log only 5 error rows per dataset to avoid log flooding
         max_consecutive_failures = 5
         consecutive_failures = 0
-
+        
+        # Invokes pipeline.py function ingest_recipe to upsert data in Meal DBs in Supabase
         for idx, rec in enumerate(recipes):
             try:
+                # TO DO: If this calls ingest_recipe to upsert data at record level or batch level. 
+                # TO DO: Record level is too slow look for method to insert at batch level
                 etl.ingest_recipe(rec, index=idx)
                 consecutive_failures = 0
+            # Long code to silence consecutive errors logs in CLI
             except Exception as exc:  # noqa: BLE001
                 consecutive_failures += 1
 
@@ -153,6 +168,7 @@ def ingest_folder(folder: str = "data/kaggle") -> None:
 
         total_recipes += len(recipes)
 
+    # Successfully ingested all records from kaggle files in the data/kaggle folder to Supabase Meal DBs
     logger.info(
         "Finished ingesting all Kaggle datasets. Total recipes: %d",
         total_recipes,
