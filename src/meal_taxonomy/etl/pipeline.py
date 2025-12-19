@@ -133,6 +133,8 @@ class MealETL:
             "cook_time_minutes": rec.cook_time_minutes,
             "prep_time_minutes": rec.prep_time_minutes,
             "servings": rec.meta.get("servings"),
+            # ✅ Store full dataset metadata for the Recipe Record for later ontology / debugging use
+            "meta": rec.meta or {},
         }
 
         # Perform actual DB upsert operation to enter data in Meals DB in Supabase
