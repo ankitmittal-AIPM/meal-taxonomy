@@ -15,7 +15,7 @@ b. generate_tag_candidates_for_recipe adds NLP-based tags.
 c. merge_tag_candidates dedupes by (tag, source) with max confidence and then attach_tags_to_recipe writes into recipe_tags.
 
 Logging in loops:
-a. Info-level logging is only per-100 recipes in ETLPipeline.ingest_dataset, which is good for large runs.
+a. Info-level logging is only per-100 recipes in ETL.Pipeline.ingest_dataset, which is good for large runs.
 b. Per-recipe and per-ingredient logging is at DEBUG level, so it won’t flood logs in normal production. Good.
 """
 
@@ -30,6 +30,11 @@ from src.meal_taxonomy.datasets.base import RecipeRecord
 from src.meal_taxonomy.datasets.indian_kaggle import load_indian_kaggle_csv
 from src.meal_taxonomy.nlp_tagging import RecipeNLP, TagCandidate
 from src.meal_taxonomy.logging_utils import get_logger
+
+# Newly Added: A helper that converts a RecipeRecord into RawMeal, then runs enrichment + upsert:
+from src.meal_taxonomy.brain.schema import RawMeal
+from src.meal_taxonomy.enrichment.enrichment_pipeline import MealEnrichmentPipeline
+from src.meal_taxonomy.brain.upsert_meal import upsert_meal
 
 MODULE_PURPOSE = (
     "ETL pipeline that creates meals, ingredients and attaches tags "
@@ -55,6 +60,8 @@ class MealETL:
         self.nlp = RecipeNLP()
         self.tag_type_cache: Dict[str, int] = {}
         self.tag_cache: Dict[tuple[int, str], str] = {}
+        self.enrichment = MealEnrichmentPipeline(use_llm=False)  # toggle later
+
 
     # -----------------------------------------------------
     # Safe bulk upsert with fallback
@@ -370,6 +377,44 @@ class MealETL:
             )
 
         return meal_id
+
+    # Newly Added : New helper method on MealETL
+    def ingest_recipe_record(self, record: RecipeRecord) -> None:
+        """
+        Convert RecipeRecord -> RawMeal -> EnrichedMealVariant -> upsert_meal.
+        """
+        raw = RawMeal(
+            source_type="kaggle_indian",
+            source_id=str(record.external_id or record.id),
+            name=record.title,
+            description=None,
+            ingredients_text=record.ingredients_text,
+            instructions_text=record.instructions_text,
+            cuisine=record.meta.get("cuisine"),
+            course=record.meta.get("course"),
+            diet=record.meta.get("diet"),
+            prep_time_mins=record.prep_time_minutes,
+            cook_time_mins=record.cook_time_minutes,
+            total_time_mins=record.total_time_minutes,
+            servings=record.servings,
+            extra={"dataset_name": record.meta.get("dataset_name")},
+        )
+        enriched = self.enrichment.enrich(raw)
+        meal_id, variant_id, status = upsert_meal(enriched, self.client)
+
+        logger.info(
+            "MealETL.ingest_recipe_record completed; recipe='%s', meal_id=%s, variant_id=%s, status=%s",
+            record.title,
+            meal_id,
+            variant_id,
+            status,
+            extra={
+                "invoking_func": "MealETL.ingest_recipe_record",
+                "invoking_purpose": MODULE_PURPOSE,
+                "next_step": "",
+                "resolution": "",
+            },
+        )
 
 # Class MealETL Ends --->
 
