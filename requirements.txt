@@ -1,9 +1,30 @@
+# Core runtime
 supabase>=2.25.0
 pydantic>=2.0.0
 pandas>=2.0.0
+python-dotenv>=1.0.0
+
+# Ontologies
 rdflib>=7.0.0
+
+# NLP / embeddings
 transformers>=4.40.0
 torch            # or torch-cpu if you prefer, see PyTorch site
+
+# ---------------- Optional (recommended) for Meal Enrichment Layer-1 ML ----------------
+numpy>=1.26.0
+scikit-learn>=1.4.0
+joblib>=1.3.0
+rapidfuzz>=3.6.0
+tqdm>=4.66.0
+
+# ---------------- Optional (recommended) for local embeddings ----------------
+sentence-transformers>=2.7.0
+
+# ---------------- Optional (only if enabling Layer-2 LLM enrichment) ----------------
+openai>=1.30.0
+
+# ---------------- Optional (only if training from HuggingFace datasets) ----------------
+datasets>=2.19.0
 sentencepiece
-python-dotenv>=1.0.0
 huggingface_hub

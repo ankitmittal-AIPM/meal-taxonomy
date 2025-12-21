@@ -2,51 +2,55 @@
 from __future__ import annotations
 
 """
-upsert_meal.py
+    upsert_meal.py
 
-Purpose:
-    Given an EnrichedMealVariant, decide whether it should become:
-      - a new canonical meal, or
-      - a variant of an existing canonical meal.
+    Purpose:
+        Given an EnrichedMealVariant, decide whether it should become:
+        - a new canonical meal, or
+        - a variant of an existing canonical meal.
 
-    Then:
-      - upsert into meals (canonical),
-      - insert into meal_variants,
-      - upsert synonyms into meal_synonyms,
-      - attach tags via existing Meal Taxonomy tagging/ontology pipeline.
+        Then:
+        - upsert into meals (canonical),
+        - insert into meal_variants,
+        - upsert synonyms into meal_synonyms,
+        - attach tags via existing Meal Taxonomy tagging/ontology pipeline.
 
-    This is the "Meal Brain" entrypoint, called by ETL and user flows.
-    
-Purpose:
-    Meal Brain = canonicalization + de-duplication layer.
+        This is the "Meal Brain" entrypoint, called by ETL and user flows.
+        
+    Purpose:
+        Meal Brain = canonicalization + de-duplication layer.
 
-    Given an EnrichedMealVariant, decide whether it should become:
-      - a new canonical meal (row in `meals`), OR
-      - a variant of an existing canonical meal (row in `meal_variants` referencing an existing `meals.id`).
+        Given an EnrichedMealVariant, decide whether it should become:
+        - a new canonical meal (row in `meals`), OR
+        - a variant of an existing canonical meal (row in `meal_variants` referencing an existing `meals.id`).
 
-    This module intentionally does *NOT* attach:
-      - tags (meal_tags) or
-      - ingredients (meal_ingredients)
-    because the ETL pipeline already has robust tagging + ontology logic and we do not want to duplicate it.
+        This module intentionally does *NOT* attach:
+        - tags (meal_tags) or
+        - ingredients (meal_ingredients)
+        because the ETL pipeline already has robust tagging + ontology logic and we do not want to duplicate it.
 
-    Think of Meal Brain as:
-      - "which canonical dish is this?"  (cluster / identity)
-      - "store the source-specific variant" (provenance, dedupe, audit)
+        Think of Meal Brain as:
+        - "which canonical dish is this?"  (cluster / identity)
+        - "store the source-specific variant" (provenance, dedupe, audit)
 
-Notes:
-    - Candidate retrieval is designed to be fast:
-        * Prefer a Supabase RPC (search_meals_v2) backed by DB indexes (FTS + trigram).
-        * Fall back to a simple ILIKE scan if the RPC does not exist.
-    - Similarity scoring is intentionally simple and explainable right now (name-based).
-      You can later mix in:
-        * embedding similarity (pgvector),
-        * ingredient overlap,
-        * tag overlap,
-        * time similarity.
-
-Return:
-    (meal_id, variant_id, status)
-    where status in {"new_canonical", "attached_as_variant", "needs_review", "existing_variant"}
+    Notes:
+        - Candidate retrieval is designed to be fast:
+            * Prefer a Supabase RPC (search_meals_v2) backed by DB indexes (FTS + trigram).
+            * Fall back to a simple ILIKE scan if the RPC does not exist.
+        - Similarity scoring is intentionally simple and explainable right now (name-based).
+        You can later mix in:
+            * embedding similarity (pgvector),
+            * ingredient overlap,
+            * tag overlap,
+            * time similarity.
+    Updates in the "intelligent" version:
+    - supports canonical vs variant rows (meals.is_canonical + meals.canonical_meal_id)
+    - supports embeddings + vector candidate lookup via match_canonical_meals RPC (optional)
+    - supports search doc refresh via refresh_meal_search_doc(uuid) (optional)
+            
+    Return:
+        (meal_id, variant_id, status)
+        where status in {"new_canonical", "attached_as_variant", "needs_review", "existing_variant"}
 """
 
 import difflib
@@ -110,6 +114,8 @@ def upsert_meal(
         )
         return existing["meal_id"], existing["id"], "existing_variant"
 
+    # raw = enriched.raw
+
     # 1) Find candidates (fast DB-side search where possible)
     candidates = _find_candidate_meals(enriched, client, k=20)
 
@@ -128,14 +134,16 @@ def upsert_meal(
     else:
         meal_id = _insert_new_canonical(enriched, client)
         status = "new_canonical"
-        needs_review = False
+        needs_review = True
 
     # 4) Insert/upsert the variant row
     variant_id = _upsert_variant(meal_id, enriched, client, needs_review=needs_review)
 
     # 5) Upsert synonyms (optional table; safe no-op if table missing)
     _attach_synonyms(meal_id, enriched, client)
+    _attach_tags(meal_id, enriched, client)
 
+    # Successful insertion of new meal with dedupe and variant's check
     logger.info(
         "Meal Brain upsert done; meal_id=%s variant_id=%s status=%s best_score=%.3f",
         meal_id,
@@ -198,6 +206,8 @@ def _find_candidate_meals(
 
     Preferred path:
       - Supabase RPC "search_meals_v2" (FTS + trigram indexes)
+      If embedding is available and RPC exists:
+         call public.match_canonical_meals(query_embedding, match_count=k)
     Fallback path:
       - simple ILIKE on meals.title_normalized / meals.title
 
