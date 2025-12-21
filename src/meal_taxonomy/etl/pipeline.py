@@ -32,7 +32,7 @@ from src.meal_taxonomy.logging_utils import get_logger
 
 # Newly Added: A helper that converts a RecipeRecord into RawMeal, then runs enrichment + upsert:
 from src.meal_taxonomy.brain.schema import RawMeal
-from src.meal_taxonomy.enrichment.enrichment_pipeline import MealEnrichmentPipeline
+from src.meal_taxonomy.enrichment.enrichment_pipeline import MealEnrichmentPipeline, MealEnrichmentConfig
 from src.meal_taxonomy.enrichment.cleaning import normalize_title
 from src.meal_taxonomy.brain.upsert_meal import upsert_meal as upsert_canonical_meal
 
@@ -55,8 +55,9 @@ logger = get_logger("pipeline")
 
 # Class MealETL Started --->
 class MealETL:
-    def __init__(self, client: Client) -> None:
+    def __init__(self, client: Client, config: Optional[MealEnrichmentConfig] = None) -> None:
         self.client = client
+        self.enricher = MealEnrichmentPipeline(config=config)
         self.nlp = RecipeNLP()
         self.enrichment = MealEnrichmentPipeline(use_llm=False)  # toggle later
         # Cache tag types and tags by (name) and (tag_type_id, value)

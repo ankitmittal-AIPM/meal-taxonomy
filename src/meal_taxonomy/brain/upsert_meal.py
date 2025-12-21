@@ -366,7 +366,13 @@ def _insert_new_canonical(enriched: EnrichedMealVariant, client: Client) -> str:
             "health_tags": enriched.health_tags,
             "utensil_tags": enriched.utensil_tags,
             "extra": enriched.extra or {},
+            "difficulty": enriched.difficulty,
+            "debug": enriched.debug,
         },
+        "is_canonical": True,
+        "canonical_meal_id": None,  
+        "embedding": enriched.embedding,
+        "search_text": None,  # filled by refresh_meal_search_doc() after tags/synonyms attach
     }
 
     # Optional: store embedding if the DB schema has it.
@@ -461,6 +467,92 @@ def _upsert_variant(
         )
         return ""
 
+def _maybe_update_canonical(
+    canonical_meal_id: str,
+    enriched: EnrichedMealVariant,
+    client: Client,
+) -> None:
+    """
+    Optional: update canonical meal meta aggregates.
+
+    For now we keep this minimal to avoid overwriting curated values.
+    """
+    # You can extend this later:
+    #  - widen time ranges
+    #  - union tags
+    #  - attach missing embeddings
+    _ = canonical_meal_id, enriched, client
+    return
+
+def _attach_tags(
+    canonical_meal_id: str,
+    enriched: EnrichedMealVariant,
+    client: Client,
+) -> None:
+    """
+    Attach tags to the canonical meal using existing taxonomy seed helpers.
+    """
+    # Ensure tag types exist
+    for tag_type in [
+        "diet",
+        "meal_type",
+        "cuisine_region",
+        "course",
+        "equipment",
+        "technique",
+        "occasion",
+        "difficulty",
+        "time_bucket",
+        "taste_profile",
+        "health",
+        "ingredient_category",
+        "spice_level",
+        "kids_friendly",
+    ]:
+        try:
+            ensure_tag_type(client, tag_type, f"Auto-created tag_type: {tag_type}")
+        except Exception:
+            pass
+
+    # Insert specific tags (minimal: use ensure_tag which upserts tags)
+    # NOTE: actual linking into meal_tags is done elsewhere in your pipeline.
+    # Here we just ensure tags exist.
+    if enriched.predicted_diet:
+        ensure_tag(client, "diet", enriched.predicted_diet, enriched.predicted_diet.replace("_", " ").title())
+
+    if enriched.predicted_course:
+        ensure_tag(client, "course", enriched.predicted_course, str(enriched.predicted_course).title())
+
+    for r in (enriched.region_tags or []):
+        ensure_tag(client, "cuisine_region", r, r)
+
+    if enriched.spice_level is not None:
+        ensure_tag(client, "spice_level", str(enriched.spice_level), f"Spice {enriched.spice_level}")
+
+    if enriched.kids_friendly is not None:
+        ensure_tag(client, "kids_friendly", "kids_friendly" if enriched.kids_friendly else "not_kids_friendly",
+                   "Kids-friendly" if enriched.kids_friendly else "Not kids-friendly")
+
+    for h in (enriched.health_tags or []):
+        ensure_tag(client, "health", h, h.replace("_", " ").title())
+
+    for o in (enriched.occasion_tags or []):
+        ensure_tag(client, "occasion", o, o.replace("_", " ").title())
+
+    for u in (enriched.utensil_tags or []):
+        ensure_tag(client, "equipment", u, u.replace("_", " ").title())
+
+
+def _refresh_search_doc(meal_id: str, client: Client) -> None:
+    """Call refresh_meal_search_doc(uuid) if present."""
+    try:
+        client.rpc("refresh_meal_search_doc", {"target_meal_id": meal_id}).execute()
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _normalize(s: str) -> str:
+    return " ".join((s or "").strip().lower().split())
 
 # ----------------------------------------------------------------------
 # Synonyms (optional)

@@ -15,6 +15,14 @@ import re
 from typing import Optional
 
 
+_COMMON_REPLACEMENTS = [
+    (r"\brecipe\b", ""),
+    (r"\bidly\b", "idli"),
+    (r"\bdahi\b", "curd"),
+    (r"\bmirchi\b", "chilli"),
+    (r"\bchilli powder\b", "red chilli powder"),
+]
+
 def clean_meal_name(name: Optional[str]) -> Optional[str]:
     if not isinstance(name, str):
         return None
@@ -24,6 +32,23 @@ def clean_meal_name(name: Optional[str]) -> Optional[str]:
     # Remove common junk
     t = re.sub(r"\b(recipe|authentic|best|easy|quick)\b", "", t, flags=re.I)
     t = re.sub(r"\s+", " ", t).strip()
+    
+    # Remove any parentheses that contain the word "recipe"
+    t = re.sub(r"\([^)]*recipe[^)]*\)", "", t, flags=re.IGNORECASE)
+
+    # Remove standalone word "Recipe"
+    t = re.sub(r"\brecipe\b", "", t, flags=re.IGNORECASE)
+
+    # Collapse multiple spaces
+    t = re.sub(r"\s+", " ", t)
+
+    # Remove hyphens/dashes at start or end
+    t = t.strip(" -\u2013\u2014")
+
+    # Apply common replacements
+    for pat, rep in _COMMON_REPLACEMENTS:
+        t = re.sub(pat, rep, t, flags=re.IGNORECASE)
+    
     return t
 
 
@@ -74,3 +99,17 @@ def normalize_title(title: Optional[str]) -> str:
     # Collapse multiple spaces.
     t = re.sub(r"\s+", " ", t)
     return t.strip()
+
+def split_ingredient_lines(txt: str) -> list[str]:
+    """Best-effort split of ingredient list into lines/tokens."""
+    if not txt:
+        return []
+    # Split common separators
+    parts = re.split(r"[,\n;]+", txt)
+    out = []
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        out.append(p)
+    return out

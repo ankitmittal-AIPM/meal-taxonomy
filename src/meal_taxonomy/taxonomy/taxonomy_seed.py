@@ -46,6 +46,8 @@ TAG_TYPES: Dict[str, str] = {
     "cuisine_region": "Geographical region of cuisine (South India, North India, Punjabi, Tamil, etc.)",
     "cuisine_national": "National cuisines (Indian, Italian, Chinese, etc.)",
     "meal_type": "Meal context (breakfast, lunch, dinner, snack, tiffin, dessert, beverage)",
+    "spice_level": "Spice level rating (1-5) inferred from ingredients/instructions.",
+    "kids_friendly": "Kids-friendly yes/no signal derived from spice + dish patterns.",
     "course": "Course within a meal (starter, main, side, dessert, drink, chutney)",
     "taste_profile": "Flavor profile (spicy, sweet, sour, tangy, umami, chatpata, bitter, etc.)",
     "time_bucket": "Prep/cook time buckets (under_15_min, under_30_min, under_60_min, over_60_min, slow_cook, etc.)",
