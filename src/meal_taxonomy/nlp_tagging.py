@@ -25,17 +25,19 @@ d. dish_type (curry, salad, soup, rice_dish, bread, snack)
 e. nutrition_profile (high_protein, low_carb, high_fiber)
 
 Still uses NER where possible, but treats it as an extra layer.
+
+
+This module provides:
+- TagCandidate dataclass (consumed by pipeline.py)
+- RecipeNLP helper class:
+  * rule-based tagging
+  * optional NER-based tagging (HuggingFace)
+  * time bucketing
 """
 
-# nlp_tagging.py
-# nlp_tagging.py
-
-# nlp_tagging.py
-
-# nlp_tagging.py
-
 from dataclasses import dataclass
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Dict
+import re
 from src.meal_taxonomy.logging_utils import get_logger
 
 logger = get_logger("nlp_tagging")
@@ -77,16 +79,17 @@ class RecipeNLP:
       2) Rule-based keyword tagging for Indian + global recipes
 
     It outputs TagCandidate objects that pipeline.py turns into tags + meal_tags.
+      Note:
+      - This is intentionally pragmatic.
+      - We extract "good enough" tags to bootstrap the taxonomy.
     """
-    # Popular model trained on TASTEset for food NER. This has diet, taste, process, etc. trained on more than 100K recipe sentences.
-    MODEL_NAME = "dmargutierrez/distilbert-base-uncased-TASTESet-ner"
-    
     # Intialize RecipeNLP, optionally loading HF model. This will log and proceed if transformers not installed.
     # Purpose: Uses HuggingFace transformers to load a NER (Named Entity Recognition) model for recipe tagging.
-    def __init__(self, model_name: str | None = None) -> None:
-        self.model_name = model_name or self.MODEL_NAME
+    def __init__(self) -> None:
         self._ner = None
+        self._init_ner_pipeline()
 
+    def _init_ner_pipeline(self) -> None:
         if pipeline is None:
             # transformers not installed – log and proceed with rule-based only
             logger.warning(
@@ -94,7 +97,7 @@ class RecipeNLP:
                 extra={
                     "invoking_func": "__init__",
                     "invoking_purpose": "Initialize RecipeNLP and optionally load HF NER model",
-                    "next_step": "Proceed without loading HuggingFace model",
+                    "next_step": "Proceed without loading HuggingFace model and proceed with rule-based tags only",
                     "resolution": (
                         "Install 'transformers' and 'torch' in the environment if NER is desired"
                     ),
@@ -104,9 +107,13 @@ class RecipeNLP:
 
         # Try to load HuggingFace model
         try:
+            model_name="dslim/bert-base-NER"
+            # Below is Popular model trained on TASTEset for food NER. This has diet, taste, process, etc. trained on more than 100K recipe sentences.
+            # MODEL_NAME = "dmargutierrez/distilbert-base-uncased-TASTESet-ner"
+            # Informing on loading model
             logger.info(
                 "Loading HuggingFace NER model '%s' for RecipeNLP",
-                self.model_name,
+                model_name,
                 extra={
                     "invoking_func": "__init__",
                     "invoking_purpose": "Initialize RecipeNLP and optionally load HF NER model",
@@ -115,18 +122,18 @@ class RecipeNLP:
                 },
             )
 
-            tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            model = AutoModelForTokenClassification.from_pretrained(self.model_name)
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            model = AutoModelForTokenClassification.from_pretrained(model_name)
             self._ner = pipeline(
                 "token-classification",
                 model=model,
                 tokenizer=tokenizer,
                 aggregation_strategy="simple",
             )
-
+            # Successfully loaded the model
             logger.info(
                 "Successfully loaded HuggingFace NER model '%s'",
-                self.model_name,
+                model_name,
                 extra={
                     "invoking_func": "__init__",
                     "invoking_purpose": "Initialize RecipeNLP and optionally load HF NER model",
@@ -134,12 +141,12 @@ class RecipeNLP:
                     "resolution": "",
                 },
             )
-
+        # Else tell code to proceed without Name Entity Recongnition model
         except Exception as exc:  # noqa: BLE001
             # Log failure but keep rule-based tagging available
             logger.error(
                 "Failed to load HuggingFace NER model '%s': %s",
-                self.model_name,
+                model_name,
                 exc,
                 extra={
                     "invoking_func": "__init__",
@@ -231,6 +238,7 @@ class RecipeNLP:
             "eggetarian",
             "egg only",
         ],
+    
     }
     DIET_LABELS = {
         "vegan": "Vegan",
@@ -420,6 +428,7 @@ class RecipeNLP:
         "high_fiber": "High fibre",
     }
 
+
     # ------------ Rule-based taggers ------------
     # This is a helper to check if any keyword is in text and accordingly add tags.
     @staticmethod
@@ -431,7 +440,7 @@ class RecipeNLP:
         """
         Heuristic tags from plain-text keywords (English / Hinglish).
         """
-        text_l = text.lower()
+        text_l = (text or "").lower()
         tags: list[TagCandidate] = []
 
         # Diet
@@ -500,6 +509,29 @@ class RecipeNLP:
                         source="nlp_rule_based_tag"
                     )
                 )
+
+        # To Do: Change Cuisine to other way of rule based
+        # Cuisine region (simple)
+        if "indian" in text_l:
+            tags.append(
+                TagCandidate(
+                    tag_type="cuisine_region", 
+                    value="indian", 
+                    label_en="Indian", 
+                    confidence=0.7,
+                    source="nlp_rule_based_tag"
+                )
+            )
+        if "mexican" in text_l:
+            tags.append(
+                TagCandidate(
+                    tag_type="cuisine_region", 
+                    value="mexican", 
+                    label_en="Mexican", 
+                    confidence=0.7,
+                    source="nlp_rule_based_tag"
+                )
+            )
 
         return tags
 
@@ -592,7 +624,6 @@ class RecipeNLP:
 
         return tags
 
-    
     # ------------------------------------------------------------------
     # Entry point used by pipeline.py
     # Purpose: Combine ingredients + extra recipe text (title, instructions) and return a richer set of TagCandidates.
@@ -648,4 +679,37 @@ class RecipeNLP:
         )
         return final_tags
 
+    # ------------------------------------------------------------------
+    # Compatibility helper (used by enrichment_pipeline.py)
+    # Purpose:
+    #   Enrichment pipeline wants a (title, ingredients_text, instructions_text) interface.
+    #   Internally, our canonical NLP entrypoint is nlp_tags_for_recipe(ingredients, extra_text).
+    # ------------------------------------------------------------------
+    def generate_tag_candidates_for_recipe(
+        self,
+        title: str,
+        ingredients: str,
+        instructions: str,
+    ) -> List[TagCandidate]:
+        """Generate TagCandidate objects for a recipe.
 
+        This wrapper exists so the enrichment layer can call NLP in a simple way
+        without needing to know our internal API details.
+
+        Args:
+            title: Recipe title (string)
+            ingredients: Ingredients as a single string (comma/newline separated)
+            instructions: Instructions as a single string
+
+        Returns:
+            List[TagCandidate]
+        """
+        # Turn ingredients free-text into a list of "lines"
+        # (keeps compatibility with the existing nlp_tags_for_recipe logic)
+        parts = re.split(r"[\n,;]+", ingredients or "")
+        ing_lines = [p.strip() for p in parts if p and p.strip()]
+
+        extra_parts = [title or "", instructions or ""]
+        extra_text = "\n".join(p for p in extra_parts if p.strip())
+
+        return self.nlp_tags_for_recipe(ing_lines, extra_text=extra_text)

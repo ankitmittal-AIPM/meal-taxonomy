@@ -18,7 +18,6 @@ Purpose:
 """
 
 from typing import Dict, List, Optional
-
 from src.meal_taxonomy.logging_utils import get_logger, RUN_ID
 from src.meal_taxonomy.nlp_tagging import RecipeNLP, TagCandidate
 from src.meal_taxonomy.enrichment.cleaning import (
@@ -41,14 +40,14 @@ class MealEnrichmentPipeline:
     def __init__(self, use_llm: bool = False) -> None:
         self.use_llm = use_llm
         self.nlp = RecipeNLP()
-        # You can plug ML models here later (course/diet/region classifiers, etc.)
+        # To Do : You can plug ML models here later (course/diet/region classifiers, etc.)
         self._init_llm_if_needed()
 
     def _init_llm_if_needed(self) -> None:
         if not self.use_llm:
             self.llm_client = None
             return
-        # TODO: wire this to your LLM of choice (e.g. OpenAI client)
+        # TO DO: wire this to your LLM of choice (e.g. OpenAI client)
         self.llm_client = None
 
     # ------------------------------------------------------------------
@@ -99,7 +98,7 @@ class MealEnrichmentPipeline:
         extra: Dict[str, object] = {}
 
         if self.llm_client is not None:
-            # TODO: implement LLM call to enrich synonyms/description/tags
+            # TO DO: implement LLM call to enrich synonyms/description/tags
             pass
 
         # ---------------- Time + embedding --------------------------------
@@ -114,6 +113,7 @@ class MealEnrichmentPipeline:
             [
                 canonical_name or "",
                 ingredients_norm,
+                instructions_norm,
                 raw.cuisine or "",
                 raw.course or "",
                 raw.diet or "",

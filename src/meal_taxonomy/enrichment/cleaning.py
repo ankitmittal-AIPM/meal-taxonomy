@@ -17,23 +17,14 @@ from typing import Optional
 
 def clean_meal_name(name: Optional[str]) -> Optional[str]:
     if not isinstance(name, str):
-        return name
-
-    n = name.strip()
-
-    # Remove "(something recipe)" noise
-    n = re.sub(r"\([^)]*recipe[^)]*\)", "", n, flags=re.IGNORECASE)
-    n = re.sub(r"\brecipe\b", "", n, flags=re.IGNORECASE)
-
-    # Collapse spaces and trim dashes
-    n = re.sub(r"\s+", " ", n)
-    n = n.strip(" -\u2013\u2014")
-
-    # Common standardizations (extend as you discover)
-    n = re.sub(r"\bIdly\b", "Idli", n)
-    n = re.sub(r"\bchat\b", "Chaat", n, flags=re.IGNORECASE)
-
-    return n.strip() or None
+        return None
+    t = name.strip()
+    if not t:
+        return None
+    # Remove common junk
+    t = re.sub(r"\b(recipe|authentic|best|easy|quick)\b", "", t, flags=re.I)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
 
 
 def normalize_ingredients(text: Optional[str]) -> str:
@@ -52,5 +43,34 @@ def normalize_instructions(text: Optional[str]) -> str:
     t = text.replace("\r", " ")
     lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
     t = " ".join(lines)
+    t = re.sub(r"\s+", " ", t)
+    return t.strip()
+
+
+def normalize_title(title: Optional[str]) -> str:
+    """Normalize a meal title for search / dedupe.
+
+    Why:
+        - `meals.title` is for display.
+        - `meals.title_normalized` is for indexing (trigram / FTS fallback) and
+          deterministic equality checks.
+
+    Behavior:
+        - cleans obvious junk words (via clean_meal_name),
+        - lowercases,
+        - strips most punctuation,
+        - collapses whitespace.
+
+    Notes:
+        - We intentionally keep digits (e.g., "2-minute noodles").
+        - This is a *light* normalizer. Do not over-stem; keep it readable.
+    """
+    if not isinstance(title, str):
+        return ""
+    cleaned = clean_meal_name(title) or title
+    t = cleaned.lower()
+    # Replace non-alphanumeric (incl. underscores) with spaces.
+    t = re.sub(r"[^a-z0-9]+", " ", t)
+    # Collapse multiple spaces.
     t = re.sub(r"\s+", " ", t)
     return t.strip()

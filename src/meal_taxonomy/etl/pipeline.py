@@ -21,7 +21,6 @@ b. Per-recipe and per-ingredient logging is at DEBUG level, so it won’t flood 
 
 import logging
 from typing import Dict, List, Optional
-
 from supabase import Client
 
 from src.meal_taxonomy.config import get_supabase_client
@@ -34,7 +33,8 @@ from src.meal_taxonomy.logging_utils import get_logger
 # Newly Added: A helper that converts a RecipeRecord into RawMeal, then runs enrichment + upsert:
 from src.meal_taxonomy.brain.schema import RawMeal
 from src.meal_taxonomy.enrichment.enrichment_pipeline import MealEnrichmentPipeline
-from src.meal_taxonomy.brain.upsert_meal import upsert_meal
+from src.meal_taxonomy.enrichment.cleaning import normalize_title
+from src.meal_taxonomy.brain.upsert_meal import upsert_meal as upsert_canonical_meal
 
 MODULE_PURPOSE = (
     "ETL pipeline that creates meals, ingredients and attaches tags "
@@ -58,11 +58,14 @@ class MealETL:
     def __init__(self, client: Client) -> None:
         self.client = client
         self.nlp = RecipeNLP()
+        self.enrichment = MealEnrichmentPipeline(use_llm=False)  # toggle later
+        # Cache tag types and tags by (name) and (tag_type_id, value)
         self.tag_type_cache: Dict[str, int] = {}
         self.tag_cache: Dict[tuple[int, str], str] = {}
-        self.enrichment = MealEnrichmentPipeline(use_llm=False)  # toggle later
-
-
+        
+        # Cache ingredients by lower(name)
+        self.ingredient_cache: Dict[str, str] = {}
+        
     # -----------------------------------------------------
     # Safe bulk upsert with fallback
     # Tries bulk .upsert(rows)
@@ -86,9 +89,20 @@ class MealETL:
         except Exception as exc:  # noqa: BLE001
             msg = str(exc).lower()
             if "parallel" in msg or "multiple" in msg or "bulk" in msg:
-                # Conservative fallback: one row at a time
-                for row in rows:
-                    self.client.table(table).upsert(row).execute()
+                # Many Supabase setups allow big inserts but can fail if huge.
+                # We'll chunk it just in case.
+                try:
+                    chunk_size = 500    # To Do : iterate to see the best chunk size
+                    for i in range(0, len(rows), chunk_size):
+                        chunk = rows[i : i + chunk_size]
+                        self.client.table(table).upsert(chunk).execute()
+                # Exception inside exception for bulk upload
+                except Exception as exc:  # noqa: BLE001
+                    msg = str(exc).lower()
+                    if "parallel" in msg or "multiple" in msg or "bulk" in msg:
+                    # Conservative fallback: one row at a time
+                        for row in rows:
+                            self.client.table(table).upsert(row).execute()
             else:
                 # Not the known bulk-insert limitation -> bubble up
                 raise
@@ -96,11 +110,15 @@ class MealETL:
     # -----------------------------------------------------
     # Tag helpers
     # -----------------------------------------------------
-    def get_tag_type_id(self, name: str, description: str = "") -> int:
+    def get_tag_type_id(self, name: str) -> str:
         if name in self.tag_type_cache:
             return self.tag_type_cache[name]
 
-        tt_id = ensure_tag_type(self.client, name, description or name)
+        tt_id = ensure_tag_type(
+            self.client,
+            name=name,
+            label_en=name.replace("_", " ").title(),
+        )
         self.tag_type_cache[name] = tt_id
         return tt_id
 
@@ -131,6 +149,7 @@ class MealETL:
         # TO DO: check if this insert the data or prepare payload at record level or batch level
         payload = {
             "title": rec.title,
+            "title_normalized": normalize_title(rec.title),
             "description": rec.description,
             "instructions": rec.instructions,
             "source": "dataset",
@@ -139,6 +158,7 @@ class MealETL:
             "language_code": rec.language_code,
             "cook_time_minutes": rec.cook_time_minutes,
             "prep_time_minutes": rec.prep_time_minutes,
+            "total_time_minutes": (rec.cook_time_minutes or 0) + (rec.prep_time_minutes or 0),
             "servings": rec.meta.get("servings"),
             # ✅ Store full dataset metadata for the Recipe Record for later ontology / debugging use
             "meta": rec.meta or {},
@@ -160,40 +180,9 @@ class MealETL:
             .eq("external_id", rec.external_id)
             .execute()
         )
-        return res.data[0]["id"]
+        if not res.data:
+            raise RuntimeError(f"Upsert meal failed for {rec.source}:{rec.external_id}")
 
-    # Invoked Address : From attach_ingredients
-    # This basically checks any ingredient already available in the ingredient table otherwise add one
-    # Ingredient table populates through meals addition where ingredient is listed, 
-    # searched in ingredient table and if not found then added as new record
-    def get_or_create_ingredient(self, name_en: str) -> str:
-        name_en = name_en.strip()
-        
-        # Search if ingredient already exists if so gets ingredient id and return back to calling function
-        res = (
-            self.client.table("ingredients")
-            .select("id")
-            .eq("name_en", name_en)
-            .execute()
-        )
-        if res.data:
-            return res.data[0]["id"]        
-        
-        # Fallback. Another way to search ingredient in the table. Just to double sure using "like"
-        res = (
-            self.client.table("ingredients")
-            .select("id")
-            .ilike("name_en", name_en)
-            .limit(1)
-            .execute()
-        )
-        if res.data:
-            return res.data[0]["id"]
-
-        # Add new ingredient if not found in previous step and returns id for new ingredient just added
-        res = self.client.table("ingredients").insert(
-            {"name_en": name_en}
-        ).execute()
         return res.data[0]["id"]
 
     # Invoked Address : From ingest_recipe post meal id is generated against (new or existing) single meal
@@ -221,6 +210,47 @@ class MealETL:
         if rows:
             self._safe_bulk_upsert("meal_ingredients", rows)
 
+    # Invoked Address : From attach_ingredients
+    # This basically checks any ingredient already available in the ingredient table otherwise add one
+    # Ingredient table populates through meals addition where ingredient is listed, 
+    # searched in ingredient table and if not found then added as new record
+    def get_or_create_ingredient(self, name_en: str) -> str:
+        name_en = (name_en or "").strip()
+        if not name_en:
+            raise ValueError("Ingredient name empty")
+        if name_en in self.ingredient_cache:
+            return self.ingredient_cache[name_en]
+        
+        # Search if ingredient already exists if so gets ingredient id and return back to calling function
+        res = (
+            self.client.table("ingredients")
+            .select("id")
+            .eq("name_en", name_en)
+            .execute()
+        )
+        if res.data:
+            return res.data[0]["id"]        
+        
+        # Fallback. Another way to search ingredient in the table. Just to double sure using "like"
+        res = (
+            self.client.table("ingredients")
+            .select("id")
+            .ilike("name_en", name_en)
+            .limit(1)
+            .execute()
+        )
+        if res.data:
+            return res.data[0]["id"]
+
+        # Add new ingredient if not found in previous step and returns id for new ingredient just added
+        res = self.client.table("ingredients").insert(
+            {"name_en": name_en}
+        ).execute()
+        
+        ing_id = res.data[0]["id"]
+        self.ingredient_cache[name_en] = ing_id
+        return ing_id
+
     # -----------------------------------------------------
     # Tag extraction - Extracting/Building tags to a recipe record object
     # Invoked Address : called from ingest_recipe post ingredient and 
@@ -231,6 +261,7 @@ class MealETL:
         meta = rec.meta or {}
         tags: List[TagCandidate] = []
 
+        # Region
         region = (meta.get("region") or "").strip()
         if region:
             tags.append(
@@ -243,6 +274,7 @@ class MealETL:
                 )
             )
 
+        # Cuisine
         cuisine = (meta.get("cuisine") or "").strip()
         if cuisine:
             tags.append(
@@ -254,7 +286,8 @@ class MealETL:
                 )
             )
 
-        diet = meta.get("diet")
+        # Diet
+        diet = (meta.get("diet") or "").strip()
         if diet:
             d = str(diet).strip()
             if d:
@@ -267,7 +300,8 @@ class MealETL:
                     )
                 )
 
-        flavor = meta.get("flavor")
+        # Flavor profile
+        flavor = (meta.get("flavor") or "").strip()
         if flavor:
             f = str(flavor).strip()
             if f:
@@ -280,7 +314,7 @@ class MealETL:
                     )
                 )
 
-        # Meal type
+        # Meal type or Course
         meal_type = meta.get("course")
         if not meal_type:
             t = rec.title.lower()
@@ -316,6 +350,92 @@ class MealETL:
         return self.nlp.nlp_tags_for_recipe(rec.ingredients, extra_text=extra_text)
 
     # -----------------------------------------------------
+    # Enrichment-derived tags (Meal Enrichment outputs)
+    # These tags should NOT duplicate dataset_tags() or nlp_tags().
+    # They are intended for:
+    #   - difficulty
+    #   - spice_level
+    #   - kids_friendly
+    #   - health tags / occasions / equipment (when you later turn on LLM/ML)
+    # -----------------------------------------------------
+    def enrichment_tags(self, enriched) -> List[TagCandidate]:
+        tags: List[TagCandidate] = []
+
+        def _val(x: str) -> str:
+            return normalize_title(x).replace(" ", "_")
+
+        # Spice level (1-5)
+        if getattr(enriched, "spice_level", None) is not None:
+            lvl = int(enriched.spice_level)
+            tags.append(
+                TagCandidate(
+                    tag_type="spice_level",
+                    value=f"level_{lvl}",
+                    label_en=f"Spice level {lvl}",
+                    confidence=0.7,
+                )
+            )
+
+        # Difficulty
+        if getattr(enriched, "difficulty", None):
+            diff = str(enriched.difficulty)
+            tags.append(
+                TagCandidate(
+                    tag_type="difficulty",
+                    value=_val(diff),
+                    label_en=diff.title(),
+                    confidence=0.7,
+                )
+            )
+
+        # Kids friendly
+        if getattr(enriched, "kids_friendly", None) is not None:
+            val = "kids_friendly" if bool(enriched.kids_friendly) else "not_kids_friendly"
+            tags.append(
+                TagCandidate(
+                    tag_type="kids_friendly",
+                    value=val,
+                    label_en=val.replace("_", " ").title(),
+                    confidence=0.7,
+                )
+            )
+
+        # Occasion tags
+        for occ in getattr(enriched, "occasion_tags", []) or []:
+            tags.append(
+                TagCandidate(
+                    tag_type="occasion",
+                    value=_val(str(occ)),
+                    label_en=str(occ).title(),
+                    confidence=0.6,
+                )
+            )
+
+        # Health tags
+        for ht in getattr(enriched, "health_tags", []) or []:
+            tags.append(
+                TagCandidate(
+                    tag_type="health_tag",
+                    value=_val(str(ht)),
+                    label_en=str(ht).title(),
+                    confidence=0.6,
+                )
+            )
+
+        # Equipment / utensil tags
+        for eq in getattr(enriched, "utensil_tags", []) or []:
+            tags.append(
+                TagCandidate(
+                    tag_type="equipment",
+                    value=_val(str(eq)),
+                    label_en=str(eq).title(),
+                    confidence=0.6,
+                )
+            )
+
+        return tags
+
+    # -----------------------------------------------------
     # Tag persistence - Attaching Tags to the Meals in Meal_Tag Db in Supabase
     # Invoked Address : Called from ingest_recipe post tags to a recipe in the recipe record objects are identified
     # -----------------------------------------------------
@@ -336,18 +456,46 @@ class MealETL:
             # Use the generic safe bulk upsert helper
             self._safe_bulk_upsert("meal_tags", rows)
 
-
     # -----------------------------------------------------
     # Main recipe ingestion in Supabase DB
     # Invoke Address: Invoked from ingest_kaggle_all which is code to 
     # read all kaggle based datasource from data/kaggle folder and add 
     # records in those files in Meal DBs in Supabase
     # -----------------------------------------------------
-    def ingest_recipe(self, rec: RecipeRecord, index: int | None = None) -> str:
+    def ingest_recipe(self, rec: RecipeRecord, index: int | None = None, *, use_brain: bool = True) -> str:
         
-        # Step 1 - Gets meal id for the upserted record in the Supabase 
-        # after upsert_meal successfuly upsert the record in Meals Db in supabase
-        meal_id = self.upsert_meal(rec)
+        # Step 1 - Decide canonical meal id.
+        # Default path uses Meal Brain (canonicalization + variants) so we can:
+        #   - dedupe across sources,
+        #   - keep provenance (variants),
+        #   - attach tags/ingredients/ontology once on canonical meals.
+        enriched = None
+        variant_id = ""
+        status = "legacy"
+        if use_brain:
+            raw = RawMeal(
+                source_type=rec.source,
+                source_id=str(rec.external_id),
+                name=rec.title,
+                description=rec.description,
+                ingredients_text="\n".join(rec.ingredients or []),
+                instructions_text=rec.instructions or "",
+                cuisine=(rec.meta or {}).get("cuisine"),
+                course=(rec.meta or {}).get("course"),
+                diet=(rec.meta or {}).get("diet"),
+                prep_time_mins=rec.prep_time_minutes,
+                cook_time_mins=rec.cook_time_minutes,
+                total_time_mins=(rec.cook_time_minutes or 0) + (rec.prep_time_minutes or 0),
+                servings=(rec.meta or {}).get("servings"),
+                extra=(rec.meta or {}),
+            )
+            enriched = self.enrichment.enrich(raw)
+            meal_id, variant_id, status = upsert_canonical_meal(enriched, self.client)
+        else:
+            # Legacy behavior: each dataset row becomes a row in meals (no canonicalization).
+            # Step 1 - Gets meal id for the upserted record in the Supabase 
+            # after upsert_meal successfuly upsert the record in Meals Db in supabase
+            meal_id = self.upsert_meal(rec)
         
         # Step 2 - Attaches ingredient to the meal in the Supabase DB
         self.attach_ingredients(meal_id, rec.ingredients)
@@ -358,9 +506,30 @@ class MealETL:
         # Step 3.2 - Extract Tags for the data record in Reciperecord object passed (NLP Based Tags)
         nlp_tags = self.nlp_tags(rec)
 
+        # Step 3.3 - Additional enrichment-derived tags (difficulty, spice, equipment, etc.)
+        enrich_tags: List[TagCandidate] = []
+        if enriched is not None:
+            enrich_tags = self.enrichment_tags(enriched)
+
         # Step 4 - Attach Tags to the meal Id in Supabase - First hardcoded based and then NLP based
         self.attach_tags(meal_id, ds_tags, source="dataset")
         self.attach_tags(meal_id, nlp_tags, source="nlp")
+        self.attach_tags(meal_id, enrich_tags, source="enrichment")
+
+        # Log brain status for debugging (does not spam because per-recipe INFO is acceptable for ETL)
+        if use_brain:
+            logger.debug(
+                "Meal Brain result for '%s': status=%s variant_id=%s",
+                rec.title,
+                status,
+                variant_id,
+                extra={
+                    "invoking_func": "MealETL.ingest_recipe",
+                    "invoking_purpose": MODULE_PURPOSE,
+                    "next_step": "Continue tag + ingredient attachment",
+                    "resolution": status,
+                },
+            )
 
         # Milestone logging: every 50 rows
         if index is not None and index % 50 == 0:
@@ -384,23 +553,23 @@ class MealETL:
         Convert RecipeRecord -> RawMeal -> EnrichedMealVariant -> upsert_meal.
         """
         raw = RawMeal(
-            source_type="kaggle_indian",
+            source_type=record.source,
             source_id=str(record.external_id or record.id),
             name=record.title,
-            description=None,
-            ingredients_text=record.ingredients_text,
-            instructions_text=record.instructions_text,
-            cuisine=record.meta.get("cuisine"),
-            course=record.meta.get("course"),
-            diet=record.meta.get("diet"),
+            description=record.description or None,
+            ingredients_text="\n".join(record.ingredients_text or []),
+            instructions_text=record.instructions_text or "",
+            cuisine=(record.meta or {}).get("cuisine"),
+            course=(record.meta or {}).get("course"),
+            diet=(record.meta or {}).get("diet"),
             prep_time_mins=record.prep_time_minutes,
             cook_time_mins=record.cook_time_minutes,
-            total_time_mins=record.total_time_minutes,
-            servings=record.servings,
+            total_time_mins=(record.cook_time_minutes or 0) + (record.prep_time_minutes or 0),
+            servings=(record.meta or {}).get("servings"),
             extra={"dataset_name": record.meta.get("dataset_name")},
         )
         enriched = self.enrichment.enrich(raw)
-        meal_id, variant_id, status = upsert_meal(enriched, self.client)
+        meal_id, variant_id, status = upsert_canonical_meal(enriched, self.client)
 
         logger.info(
             "MealETL.ingest_recipe_record completed; recipe='%s', meal_id=%s, variant_id=%s, status=%s",
@@ -432,7 +601,7 @@ def ingest_indian_kaggle(path: str) -> None:
     # TO DO: Check do we need this any more. Special function to convert 
     # weird manual recipes csv file to one readable by code before entering data in meal db
     recipes = load_indian_kaggle_csv(path)
-
+    
     # Ready to ingest data in Meal DB
     logger.info(
         "Starting ingestion of %d recipes from %s",

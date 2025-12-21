@@ -16,14 +16,47 @@ Purpose:
       - attach tags via existing Meal Taxonomy tagging/ontology pipeline.
 
     This is the "Meal Brain" entrypoint, called by ETL and user flows.
+    
+Purpose:
+    Meal Brain = canonicalization + de-duplication layer.
+
+    Given an EnrichedMealVariant, decide whether it should become:
+      - a new canonical meal (row in `meals`), OR
+      - a variant of an existing canonical meal (row in `meal_variants` referencing an existing `meals.id`).
+
+    This module intentionally does *NOT* attach:
+      - tags (meal_tags) or
+      - ingredients (meal_ingredients)
+    because the ETL pipeline already has robust tagging + ontology logic and we do not want to duplicate it.
+
+    Think of Meal Brain as:
+      - "which canonical dish is this?"  (cluster / identity)
+      - "store the source-specific variant" (provenance, dedupe, audit)
+
+Notes:
+    - Candidate retrieval is designed to be fast:
+        * Prefer a Supabase RPC (search_meals_v2) backed by DB indexes (FTS + trigram).
+        * Fall back to a simple ILIKE scan if the RPC does not exist.
+    - Similarity scoring is intentionally simple and explainable right now (name-based).
+      You can later mix in:
+        * embedding similarity (pgvector),
+        * ingredient overlap,
+        * tag overlap,
+        * time similarity.
+
+Return:
+    (meal_id, variant_id, status)
+    where status in {"new_canonical", "attached_as_variant", "needs_review", "existing_variant"}
 """
 
+import difflib
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
-
 from supabase import Client
 
 from src.meal_taxonomy.config import get_supabase_client
 from src.meal_taxonomy.logging_utils import get_logger, RUN_ID
+from src.meal_taxonomy.enrichment.cleaning import normalize_title
 from src.meal_taxonomy.brain.schema import EnrichedMealVariant
 from src.meal_taxonomy.taxonomy.taxonomy_seed import ensure_tag_type, ensure_tag
 
@@ -34,9 +67,14 @@ MODULE_PURPOSE = (
 
 logger = get_logger("brain_upsert")
 
+# ----------------------------------------------------------------------
+# Thresholds
+# ----------------------------------------------------------------------
+# If you later add embeddings, you can keep the same thresholds and adjust
+# weighting in _score_candidate().
 # Thresholds – tune empirically
-T_SAME = 0.80
-T_MAYBE = 0.65
+T_SAME = 0.80       # confidently same canonical dish
+T_MAYBE = 0.65      # plausible match; attach variant but mark needs_review
 
 
 def upsert_meal(
@@ -44,7 +82,7 @@ def upsert_meal(
     client: Optional[Client] = None,
 ) -> Tuple[str, str, str]:
     """
-    Main entry.
+    Main entry --> Upsert a canonical meal + variant given an enriched meal variant
 
     Returns:
         (meal_id, variant_id, status)
@@ -53,169 +91,317 @@ def upsert_meal(
     if client is None:
         client = get_supabase_client()
 
-    raw = enriched.raw
+    # 0) Idempotency: if this source_type+source_id variant already exists, return quickly.
+    existing = _get_existing_variant(enriched, client)
+    if existing is not None:
+        logger.info(
+            "Variant already exists; returning existing meal_id=%s variant_id=%s (source_type=%s source_id=%s)",
+            existing["meal_id"],
+            existing["id"],
+            enriched.raw.source_type,
+            enriched.raw.source_id,
+            extra={
+                "invoking_func": "upsert_meal",
+                "invoking_purpose": MODULE_PURPOSE,
+                "next_step": "Skip dedupe and return",
+                "resolution": "existing_variant",
+                "run_id": RUN_ID,
+            },
+        )
+        return existing["meal_id"], existing["id"], "existing_variant"
 
-    logger.info(
-        "Upserting RawMeal '%s' (source_type=%s, source_id=%s, run_id=%s)",
-        raw.name,
-        raw.source_type,
-        raw.source_id,
-        RUN_ID,
-        extra={
-            "invoking_func": "upsert_meal",
-            "invoking_purpose": MODULE_PURPOSE,
-            "next_step": "find candidate canonical meals",
-            "resolution": "",
-        },
-    )
+    # 1) Find candidates (fast DB-side search where possible)
+    candidates = _find_candidate_meals(enriched, client, k=20)
 
-    candidates = _find_candidate_meals(enriched, client)
-    best, score = _pick_best_candidate(enriched, candidates)
+    # 2) Pick best match by explainable scoring
+    best, best_score = _pick_best_candidate(enriched, candidates)
 
-    if best and score is not None and score >= T_SAME:
+    # 3) Decide canonical meal id
+    if best is not None and best_score >= T_SAME:
         meal_id = best["id"]
-        variant_id = _insert_variant(meal_id, enriched, client, needs_review=False)
-        _maybe_update_canonical(meal_id, enriched, client)
         status = "attached_as_variant"
-    elif best and score is not None and score >= T_MAYBE:
+        needs_review = False
+    elif best is not None and best_score >= T_MAYBE:
         meal_id = best["id"]
-        variant_id = _insert_variant(meal_id, enriched, client, needs_review=True)
         status = "needs_review"
+        needs_review = True
     else:
         meal_id = _insert_new_canonical(enriched, client)
-        variant_id = _insert_variant(meal_id, enriched, client, is_primary=True)
         status = "new_canonical"
+        needs_review = False
+
+    # 4) Insert/upsert the variant row
+    variant_id = _upsert_variant(meal_id, enriched, client, needs_review=needs_review)
+
+    # 5) Upsert synonyms (optional table; safe no-op if table missing)
+    _attach_synonyms(meal_id, enriched, client)
 
     logger.info(
-        "Upsert completed for RawMeal '%s' -> meal_id=%s, variant_id=%s, status=%s",
-        raw.name,
+        "Meal Brain upsert done; meal_id=%s variant_id=%s status=%s best_score=%.3f",
         meal_id,
         variant_id,
         status,
+        float(best_score),
         extra={
             "invoking_func": "upsert_meal",
             "invoking_purpose": MODULE_PURPOSE,
-            "next_step": "attach tags & synonyms",
-            "resolution": "",
+            "next_step": "Return to ETL (ingredients + tags + ontology)",
+            "resolution": status,
+            "run_id": RUN_ID,
         },
     )
-
-    _attach_synonyms(meal_id, enriched, client)
-    _attach_tags(meal_id, enriched, client)
 
     return meal_id, variant_id, status
 
 
 # ----------------------------------------------------------------------
-# Candidate lookup & scoring (simplified, extensible)
+# Existing variant lookup
+# ----------------------------------------------------------------------
+def _get_existing_variant(enriched: EnrichedMealVariant, client: Client) -> Optional[Dict[str, Any]]:
+    """Return existing meal_variants row for this source if present."""
+    try:
+        resp = (
+            client.table("meal_variants")
+            .select("id, meal_id")
+            .eq("source_type", enriched.raw.source_type)
+            .eq("source_id", enriched.raw.source_id)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        return rows[0] if rows else None
+    except Exception as exc:  # noqa: BLE001
+        # This usually means the table does not exist yet (migrations not applied).
+        logger.warning(
+            "Could not query meal_variants for idempotency check: %s",
+            exc,
+            extra={
+                "invoking_func": "_get_existing_variant",
+                "invoking_purpose": MODULE_PURPOSE,
+                "next_step": "Continue without idempotency shortcut",
+                "resolution": "",
+                "run_id": RUN_ID,
+            },
+        )
+        return None
+
+
+# ----------------------------------------------------------------------
+# Candidate lookup & scoring
 # ----------------------------------------------------------------------
 def _find_candidate_meals(
     enriched: EnrichedMealVariant,
     client: Client,
     k: int = 20,
 ) -> List[Dict[str, Any]]:
-    """
-    Placeholder candidate lookup.
+    """Find candidate canonical meals.
 
-    For now:
-      - naive search on canonical_name trigram,
-      - later: add vector similarity via pgvector search_meals RPC.
+    Preferred path:
+      - Supabase RPC "search_meals_v2" (FTS + trigram indexes)
+    Fallback path:
+      - simple ILIKE on meals.title_normalized / meals.title
+
+    Returns:
+      list of dicts with at least {id, title, title_normalized}
     """
-    name = enriched.canonical_name
-    if not name:
+    query = normalize_title(enriched.canonical_name or enriched.raw.name)
+
+    # Try RPC first (fast DB-side search)
+    try:
+        resp = client.rpc(
+            "search_meals_v2",
+            {
+                "query_text": query,
+                "limit": k,
+                # Keep these optional filters unset for candidate retrieval.
+                "diet_value": None,
+                "meal_type_value": None,
+                "region_value": None,
+            },
+        ).execute()
+        rows = resp.data or []
+        # Expected keys: id, title, total_time_minutes, score (depending on SQL)
+        # Normalize keys for scoring.
+        candidates: List[Dict[str, Any]] = []
+        for r in rows:
+            candidates.append(
+                {
+                    "id": r.get("id"),
+                    "title": r.get("title"),
+                    "title_normalized": r.get("title_normalized") or normalize_title(r.get("title") or ""),
+                }
+            )
+        return [c for c in candidates if c.get("id")]
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "search_meals_v2 RPC unavailable or failed (will fall back): %s",
+            exc,
+            extra={
+                "invoking_func": "_find_candidate_meals",
+                "invoking_purpose": MODULE_PURPOSE,
+                "next_step": "Fallback to ILIKE candidate search",
+                "resolution": "",
+                "run_id": RUN_ID,
+            },
+        )
+
+    # Fallback: ILIKE on title_normalized / title
+    # Use the first token to keep the query selective.
+    tokens = query.split()
+    token = tokens[0] if tokens else query
+    if not token:
         return []
 
-    # NOTE: This assumes you add a search RPC or trigram index on meals.canonical_name.
-    # Replace with your search_meals RPC if you already have one.
-    resp = (
-        client.table("meals")
-        .select("id, canonical_name, primary_cuisine, primary_course, primary_diet")
-        .ilike("canonical_name", f"%{name.split()[0]}%")
-        .limit(k)
-        .execute()
-    )
-    return resp.data or []
+    try:
+        resp = (
+            client.table("meals")
+            .select("id, title, title_normalized")
+            .ilike("title", f"%{token}%")
+            .limit(k)
+            .execute()
+        )
+        rows = resp.data or []
+        for r in rows:
+            r["title_normalized"] = r.get("title_normalized") or normalize_title(r.get("title") or "")
+        return rows
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Fallback candidate lookup failed: %s",
+            exc,
+            extra={
+                "invoking_func": "_find_candidate_meals",
+                "invoking_purpose": MODULE_PURPOSE,
+                "next_step": "Return no candidates; will create new canonical",
+                "resolution": "",
+                "run_id": RUN_ID,
+            },
+        )
+        return []
 
 
 def _pick_best_candidate(
     enriched: EnrichedMealVariant,
     candidates: List[Dict[str, Any]],
-) -> Tuple[Optional[Dict[str, Any]], Optional[float]]:
-    """
-    Compute a simple similarity score using name overlap for now.
-
-    Extend later with:
-      - Jaccard over ingredients,
-      - vector cosine similarity,
-      - cuisine/course matches, etc.
-    """
-    if not candidates:
-        return None, None
-
-    name_tokens = set(enriched.canonical_name.lower().split())
-
-    best = None
+) -> Tuple[Optional[Dict[str, Any]], float]:
+    best: Optional[Dict[str, Any]] = None
     best_score = -1.0
     for cand in candidates:
-        cand_name = (cand.get("canonical_name") or "").lower()
-        cand_tokens = set(cand_name.split())
-        inter = len(name_tokens & cand_tokens)
-        union = len(name_tokens | cand_tokens) or 1
-        sim_name = inter / union
-        score = sim_name  # later: mix in embedding + tags
-
+        score = _score_candidate(enriched, cand)
         if score > best_score:
             best_score = score
             best = cand
+    return best, float(best_score)
 
-    return best, best_score
+
+def _score_candidate(enriched: EnrichedMealVariant, cand: Dict[str, Any]) -> float:
+    """Explainable similarity score (name-based).
+
+    score in [0, 1].
+    """
+    q = normalize_title(enriched.canonical_name or enriched.raw.name)
+    c = normalize_title(cand.get("title_normalized") or cand.get("title") or "")
+
+    if not q or not c:
+        return 0.0
+
+    # Token Jaccard (robust to word order)
+    q_tokens = set(q.split())
+    c_tokens = set(c.split())
+    inter = len(q_tokens & c_tokens)
+    union = len(q_tokens | c_tokens) or 1
+    jacc = inter / union
+
+    # Sequence ratio (captures near-spellings)
+    seq = difflib.SequenceMatcher(a=q, b=c).ratio()
+
+    # Weighted blend (simple; tune later)
+    return float(0.55 * jacc + 0.45 * seq)
 
 
 # ----------------------------------------------------------------------
-# Inserts / updates
+# Persistence: meals (canonical) + meal_variants (variants)
 # ----------------------------------------------------------------------
-def _insert_new_canonical(
-    enriched: EnrichedMealVariant,
-    client: Client,
-) -> str:
-    """
-    Create a new canonical meal row in meals.
-    """
-    payload = {
-        "canonical_name": enriched.canonical_name,
-        "primary_cuisine": enriched.raw.cuisine or (enriched.region_tags[0] if enriched.region_tags else None),
-        "primary_course": enriched.predicted_course or enriched.raw.course,
-        "primary_diet": enriched.predicted_diet or enriched.raw.diet,
-        "region_tags": enriched.region_tags or None,
-        "default_spice_level": enriched.spice_level,
-        "default_servings": int(enriched.servings or 4),
-        "typical_prep_time_min": enriched.prep_time_mins,
-        "typical_cook_time_min": enriched.cook_time_mins,
-        "health_tags": enriched.health_tags or None,
-        "occasion_tags": enriched.occasion_tags or None,
-        "utensil_tags": enriched.utensil_tags or None,
-        "embedding": enriched.embedding or None,
+def _insert_new_canonical(enriched: EnrichedMealVariant, client: Client) -> str:
+    """Insert a new canonical meal row into `meals` and return meal_id."""
+    canonical_title = enriched.canonical_name or enriched.raw.name
+    payload: Dict[str, Any] = {
+        "title": canonical_title,
+        "title_normalized": normalize_title(canonical_title),
+        "description": enriched.raw.description,
+        "instructions": enriched.instructions_norm or enriched.raw.instructions_text,
+        # Keep existing schema expectations: 'source' and external_* fields.
+        "source": "canonical",
+        "external_source": "canonical",
+        "external_id": str(uuid.uuid4()),
+        "language_code": "en",
+        "cook_time_minutes": int(enriched.cook_time_mins) if enriched.cook_time_mins is not None else None,
+        "prep_time_minutes": int(enriched.prep_time_mins) if enriched.prep_time_mins is not None else None,
+        "total_time_minutes": int(enriched.total_time_mins) if enriched.total_time_mins is not None else None,
+        "servings": enriched.servings,
+        "meta": {
+            # Minimal canonical metadata (safe for ontology scripts that read meals.meta)
+            "canonical": True,
+            "created_from": {
+                "source_type": enriched.raw.source_type,
+                "source_id": enriched.raw.source_id,
+            },
+            "cuisine": enriched.raw.cuisine,
+            "course": enriched.predicted_course or enriched.raw.course,
+            "diet": enriched.predicted_diet or enriched.raw.diet,
+            "region_tags": enriched.region_tags,
+            "spice_level": enriched.spice_level,
+            "difficulty": enriched.difficulty,
+            "kids_friendly": enriched.kids_friendly,
+            "occasion_tags": enriched.occasion_tags,
+            "health_tags": enriched.health_tags,
+            "utensil_tags": enriched.utensil_tags,
+            "extra": enriched.extra or {},
+        },
     }
 
-    resp = client.table("meals").insert(payload).execute()
-    row = (resp.data or [])[0]
-    return row["id"]
+    # Optional: store embedding if the DB schema has it.
+    if enriched.embedding:
+        payload["embedding"] = enriched.embedding
+
+    # Insert with a safe fallback (in case embedding column is missing)
+    try:
+        resp = client.table("meals").insert(payload).execute()
+        row = (resp.data or [])[0]
+        return row["id"]
+    except Exception as exc:  # noqa: BLE001
+        if "embedding" in payload:
+            payload.pop("embedding", None)
+            resp = client.table("meals").insert(payload).execute()
+            row = (resp.data or [])[0]
+            logger.warning(
+                "Inserted canonical meal without embedding column (schema missing embedding?): %s",
+                exc,
+                extra={
+                    "invoking_func": "_insert_new_canonical",
+                    "invoking_purpose": MODULE_PURPOSE,
+                    "next_step": "Continue without embeddings",
+                    "resolution": "",
+                    "run_id": RUN_ID,
+                },
+            )
+            return row["id"]
+        raise
 
 
-def _insert_variant(
+def _upsert_variant(
     meal_id: str,
     enriched: EnrichedMealVariant,
     client: Client,
     *,
     needs_review: bool = False,
-    is_primary: bool = False,
 ) -> str:
-    payload = {
+    """Upsert a meal_variants row (idempotent by source_type+source_id)."""
+    payload: Dict[str, Any] = {
         "meal_id": meal_id,
         "source_type": enriched.raw.source_type,
         "source_id": enriched.raw.source_id,
         "title_original": enriched.raw.name,
-        "title_clean": enriched.canonical_name,
+        "title_normalized": normalize_title(enriched.raw.name),
         "ingredients_raw": enriched.raw.ingredients_text,
         "ingredients_norm": enriched.ingredients_norm,
         "instructions_raw": enriched.raw.instructions_text,
@@ -223,74 +409,89 @@ def _insert_variant(
         "cuisine": enriched.raw.cuisine,
         "course": enriched.predicted_course or enriched.raw.course,
         "diet": enriched.predicted_diet or enriched.raw.diet,
-        "prep_time_min": enriched.prep_time_mins,
-        "cook_time_min": enriched.cook_time_mins,
-        "total_time_min": enriched.total_time_mins,
+        "prep_time_minutes": enriched.prep_time_mins,
+        "cook_time_minutes": enriched.cook_time_mins,
+        "total_time_minutes": enriched.total_time_mins,
         "servings": enriched.servings,
-        "spice_level": enriched.spice_level,
-        "image_url": enriched.raw.extra.get("image_url") if enriched.raw.extra else None,
         "needs_review": needs_review,
-        "is_primary": is_primary,
-        "embedding": enriched.embedding or None,
+        "meta": {
+            "tag_candidates": enriched.tag_candidates,
+            "region_tags": enriched.region_tags,
+            "spice_level": enriched.spice_level,
+            "difficulty": enriched.difficulty,
+            "kids_friendly": enriched.kids_friendly,
+            "occasion_tags": enriched.occasion_tags,
+            "health_tags": enriched.health_tags,
+            "utensil_tags": enriched.utensil_tags,
+            "extra": enriched.extra or {},
+        },
     }
-    resp = client.table("meal_variants").insert(payload).execute()
-    row = (resp.data or [])[0]
-    return row["id"]
+
+    if enriched.embedding:
+        payload["embedding"] = enriched.embedding
+
+    try:
+        resp = client.table("meal_variants").upsert(
+            payload, on_conflict="source_type,source_id"
+        ).execute()
+        row = (resp.data or [])[0]
+        return row["id"]
+    except Exception as exc:  # noqa: BLE001
+        # If meal_variants doesn't exist, give a clear log and return a placeholder.
+        logger.error(
+            "Failed to upsert meal_variants (did you run migrations?): %s",
+            exc,
+            extra={
+                "invoking_func": "_upsert_variant",
+                "invoking_purpose": MODULE_PURPOSE,
+                "next_step": "Create meal_variants table and rerun",
+                "resolution": "",
+                "run_id": RUN_ID,
+            },
+        )
+        return ""
 
 
-def _maybe_update_canonical(
-    meal_id: str,
-    enriched: EnrichedMealVariant,
-    client: Client,
-) -> None:
-    """
-    Conservative canonical updater – only fills in NULLs / widens ranges.
-    """
-    # TODO: Implement range widening for time, merging tags, etc.
-    # For now, we can leave canonical as-is once created.
-    return
-
-
-def _attach_synonyms(
-    meal_id: str,
-    enriched: EnrichedMealVariant,
-    client: Client,
-) -> None:
+# ----------------------------------------------------------------------
+# Synonyms (optional)
+# ----------------------------------------------------------------------
+def _attach_synonyms(meal_id: str, enriched: EnrichedMealVariant, client: Client) -> None:
+    """Upsert alt names into meal_synonyms table (optional)."""
     alt_names = enriched.alt_names or []
     if not alt_names:
         return
 
-    rows = [
-        {
-            "meal_id": meal_id,
-            "name": name,
-            "language": "en",
-            "source": "llm",
-        }
-        for name in alt_names
-    ]
-    client.table("meal_synonyms").upsert(rows).execute()
+    rows = []
+    for name in alt_names:
+        if not name or not str(name).strip():
+            continue
+        rows.append(
+            {
+                "meal_id": meal_id,
+                "synonym": str(name).strip(),
+                "synonym_normalized": normalize_title(str(name)),
+                "language_code": "en",
+                "source": "enrichment",
+            }
+        )
 
-
-def _attach_tags(
-    meal_id: str,
-    enriched: EnrichedMealVariant,
-    client: Client,
-) -> None:
-    """
-    Turn enrichment tag_candidates into tag + meal_tag rows using your
-    existing taxonomy convention.
-    """
-    if not enriched.tag_candidates:
+    if not rows:
         return
 
-    for tag_type_name, values in enriched.tag_candidates.items():
-        tag_type_id = ensure_tag_type(client, tag_type_name, description="")
-        for value in values:
-            tag_id = ensure_tag(client, tag_type_id, value)
-            client.table("meal_tags").upsert(
-                {
-                    "meal_id": meal_id,
-                    "tag_id": tag_id,
-                }
-            ).execute()
+    try:
+        client.table("meal_synonyms").upsert(
+            rows, on_conflict="meal_id,synonym_normalized"
+        ).execute()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "Skipping meal_synonyms upsert (table missing?): %s",
+            exc,
+            extra={
+                "invoking_func": "_attach_synonyms",
+                "invoking_purpose": MODULE_PURPOSE,
+                "next_step": "(Optional) create meal_synonyms table",
+                "resolution": "",
+                "run_id": RUN_ID,
+            },
+        )
+        return
