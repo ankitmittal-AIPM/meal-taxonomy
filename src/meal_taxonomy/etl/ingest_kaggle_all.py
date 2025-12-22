@@ -11,6 +11,8 @@ B. Usage:
     ingest_folder("data/kaggle")
 
 """
+import sys
+from pathlib import Path
 
 import glob
 import os
@@ -125,7 +127,7 @@ def ingest_folder(folder: str = "data/kaggle") -> None:
             try:
                 # TO DO: If this calls ingest_recipe to upsert data at record level or batch level. 
                 # TO DO: Record level is too slow look for method to insert at batch level
-                etl.ingest_recipe(rec, index=idx)
+                etl.ingest_recipe(r)
                 consecutive_failures = 0
                 record_count += 1
                 # TO DO : Limiting testing of kaggle ingestion

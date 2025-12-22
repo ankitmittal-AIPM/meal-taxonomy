@@ -53,6 +53,7 @@ from __future__ import annotations
         where status in {"new_canonical", "attached_as_variant", "needs_review", "existing_variant"}
 """
 
+from dataclasses import asdict, is_dataclass
 import difflib
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
@@ -70,6 +71,45 @@ MODULE_PURPOSE = (
 )
 
 logger = get_logger("brain_upsert")
+
+def _serialize_tag_candidates(tag_candidates: Any) -> List[Dict[str, Any]]:
+    """Convert tag candidates to JSON-serializable dicts for Supabase JSON columns."""
+    out: List[Dict[str, Any]] = []
+    if not tag_candidates:
+        return out
+
+    # Common case: list[TagCandidate] (dataclass)
+    if isinstance(tag_candidates, list):
+        for c in tag_candidates:
+            if c is None:
+                continue
+            if is_dataclass(c):
+                out.append(asdict(c))
+            elif isinstance(c, dict):
+                out.append(c)
+            elif hasattr(c, "__dict__"):
+                out.append(dict(c.__dict__))
+            else:
+                out.append({"value": str(c)})
+        return out
+
+    # Fallback: dict-based structures
+    if isinstance(tag_candidates, dict):
+        # Convert mapping {tag_type: [values]} into a uniform list of dicts
+        for tag_type, vals in tag_candidates.items():
+            if not vals:
+                continue
+            if isinstance(vals, (list, tuple)):
+                for v in vals:
+                    out.append({"tag_type": str(tag_type), "value": str(v)})
+            else:
+                out.append({"tag_type": str(tag_type), "value": str(vals)})
+        return out
+
+    # Last resort
+    out.append({"value": str(tag_candidates)})
+    return out
+
 
 # ----------------------------------------------------------------------
 # Thresholds
@@ -431,7 +471,7 @@ def _upsert_variant(
         "servings": enriched.servings,
         "needs_review": needs_review,
         "meta": {
-            "tag_candidates": enriched.tag_candidates,
+            "tag_candidates": _serialize_tag_candidates(enriched.tag_candidates),
             "region_tags": enriched.region_tags,
             "spice_level": enriched.spice_level,
             "difficulty": enriched.difficulty,

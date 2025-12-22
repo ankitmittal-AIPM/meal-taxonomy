@@ -713,3 +713,30 @@ class RecipeNLP:
         extra_text = "\n".join(p for p in extra_parts if p.strip())
 
         return self.nlp_tags_for_recipe(ing_lines, extra_text=extra_text)
+
+    # ------------------------------------------------------------------
+    # Compatibility helper (used by enrichment_pipeline.py)
+    # Purpose:
+    #   Some callsites have only a single free-text blob (title + ingredients + instructions combined).
+    #   This helper keeps those callsites working without forcing them to pre-split ingredients.
+    # ------------------------------------------------------------------
+    def tag_recipe_text(self, text: str) -> List[TagCandidate]:
+        """
+        Tag a single free-text blob and return TagCandidate objects.
+
+        This is a thin wrapper around nlp_tags_for_recipe() and intentionally
+        does not try to perfectly parse ingredient lines. It is meant for:
+          - enrichment_pipeline internal usage
+          - quick experimentation / debug
+
+        Args:
+            text: Full recipe text (string)
+
+        Returns:
+            List[TagCandidate]
+        """
+        parts = re.split(r"[\n,;]+", text or "")
+        lines = [p.strip() for p in parts if p and p.strip()]
+        # Use the same internal merging logic by passing all text as "ingredients lines"
+        # and leaving extra_text empty.
+        return self.nlp_tags_for_recipe(lines, extra_text="")

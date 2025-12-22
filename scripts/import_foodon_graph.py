@@ -14,47 +14,43 @@ What it does:
     - Parses the FoodOn OWL/TTL file using rdflib.
     - For each class and its rdfs:subClassOf relations, ensures nodes exist in  ontology_nodes and Upserts nodes:
         * Inserts new nodes in ontology_nodes table for FoodOn classes if not already present
-    - Inserts "is_a" relations into ontology_relations.
-
-Logging:
-    Structured logs per company logging standard
-
-Usage:
-    python import_foodon_graph.py --file data/foodon.owl --namespace http://purl.obolibrary.org/obo/FOODON_
-
+    - Inserts subclass edges into ontology_relations with predicate="is_a"
 """
 
-import os
-import argparse
-from typing import Dict
-import dotenv
-dotenv.load_dotenv()
+from __future__ import annotations
+
+from typing import Dict, Optional
+import sys
+from pathlib import Path
 
 import rdflib
-from rdflib.namespace import RDFS, OWL
+from rdflib.namespace import RDFS
+from supabase import Client
 
-from supabase import create_client  # or import your own helper if you have one
+# --- Make project root importable so `src.*` imports work even when this
+# --- script is executed from the `scripts/` directory.
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]  # service key recommended
+from src.meal_taxonomy.config import get_supabase_client
 
-client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def get_or_create_node_id(
+    client: Client,
     iri: str,
-    label: str | None,
+    label: Optional[str],
     kind: str = "class",
     source: str = "FoodOn",
-    cache: Dict[str, int] | None = None,
-) -> int:
+    cache: Optional[Dict[str, str]] = None,
+) -> str:
     """
-    Ensure a row exists in ontology_nodes for this IRI and return its id.
-    Uses a local cache to avoid repeated DB hits.
+    Return ontology_nodes.id (UUID string) for a given IRI+source.
+    Caches by IRI for performance.
     """
     if cache is not None and iri in cache:
         return cache[iri]
 
-    # Try to fetch existing node
     res = (
         client.table("ontology_nodes")
         .select("id")
@@ -65,9 +61,8 @@ def get_or_create_node_id(
     )
     data = res.data or []
     if data:
-        node_id = data[0]["id"]
+        node_id = str(data[0]["id"])
     else:
-        # Insert new node
         insert_payload = {
             "iri": iri,
             "label": label or iri,
@@ -75,25 +70,27 @@ def get_or_create_node_id(
             "source": source,
         }
         ins = client.table("ontology_nodes").insert(insert_payload).execute()
-        node_id = ins.data[0]["id"]
+        if not ins.data:
+            raise RuntimeError(f"Failed to insert ontology_nodes for iri={iri}")
+        node_id = str(ins.data[0]["id"])
 
     if cache is not None:
         cache[iri] = node_id
     return node_id
 
 
-def import_foodon_graph(ontology_path: str, namespace_filter: str | None = None):
+def import_foodon_graph(ontology_path: str, namespace_filter: str | None = None) -> None:
     """
     Parse FoodOn OWL/TTL and import subclass edges as is_a relations
-    into ontology_relations.
+    into ontology_relations (predicate TEXT, not predicate_iri).
     """
+    client = get_supabase_client()
+
     print(f"Loading FoodOn ontology from {ontology_path}")
     g = rdflib.Graph()
     g.parse(ontology_path)
-
     print(f"Graph loaded: {len(g)} RDF triples")
 
-    # Optionally limit to IRIs in a specific namespace (e.g., FoodOn)
     def in_namespace(iri: rdflib.term.Identifier) -> bool:
         if not isinstance(iri, rdflib.URIRef):
             return False
@@ -101,14 +98,13 @@ def import_foodon_graph(ontology_path: str, namespace_filter: str | None = None)
             return True
         return str(iri).startswith(namespace_filter)
 
-    # Preload labels for nicer node labels
     print("Building label map...")
     label_map: Dict[str, str] = {}
-    for s, _, label in g.triples((None, RDFS.label, None)):
+    for s, _, lbl in g.triples((None, RDFS.label, None)):
         if isinstance(s, rdflib.URIRef):
-            label_map[str(s)] = str(label)
+            label_map[str(s)] = str(lbl)
 
-    node_cache: Dict[str, int] = {}
+    node_cache: Dict[str, str] = {}
     relations_to_insert = []
 
     print("Collecting subclass (is_a) relations...")
@@ -125,11 +121,9 @@ def import_foodon_graph(ontology_path: str, namespace_filter: str | None = None)
         child_label = label_map.get(child_iri)
         parent_label = label_map.get(parent_iri)
 
-        child_id = get_or_create_node_id(child_iri, child_label, cache=node_cache)
-        parent_id = get_or_create_node_id(parent_iri, parent_label, cache=node_cache)
+        child_id = get_or_create_node_id(client, child_iri, child_label, cache=node_cache)
+        parent_id = get_or_create_node_id(client, parent_iri, parent_label, cache=node_cache)
 
-        # Currently only handling direct subclass relations; ignore complex expressions.
-        # TO DO: handle OWL restrictions, intersections, unions, etc. if needed. Include more type of relations other than is_a.
         relations_to_insert.append(
             {
                 "subject_id": child_id,
@@ -141,45 +135,30 @@ def import_foodon_graph(ontology_path: str, namespace_filter: str | None = None)
 
         count += 1
         if count % 1000 == 0:
-            print(f"Collected {count} relations so far...")
+            print(f"Collected {count} relations...")
 
-        # Limit relational insert for testing; remove or increase as needed
-        if count >= 10000:  
-            break   
+    print(f"Upserting {len(relations_to_insert)} relations into ontology_relations...")
 
-    print(f"Total is_a relations collected: {len(relations_to_insert)}")
+    # Requires UNIQUE(subject_id, predicate, object_id, source) (created in 000_base_schema.sql)
+    BATCH = 2000
+    for i in range(0, len(relations_to_insert), BATCH):
+        batch = relations_to_insert[i : i + BATCH]
+        client.table("ontology_relations").upsert(
+            batch,
+            on_conflict="subject_id,predicate,object_id,source",
+        ).execute()
+        if (i // BATCH) % 5 == 0:
+            print(f"Upserted {min(i + BATCH, len(relations_to_insert))}/{len(relations_to_insert)}")
 
-    # Insert in batches to avoid huge single-payload
-    BATCH_SIZE = 1000
-    for i in range(0, len(relations_to_insert), BATCH_SIZE):
-        batch = relations_to_insert[i : i + BATCH_SIZE]
-        print(f"Inserting relations {i}–{i+len(batch)-1}...")
-        try:
-            db_response = client.table("ontology_relations").upsert(batch).execute()
-            print(f"Inserted {len(db_response.data)} relations.")
-        except Exception as e:
-            print(f"Error inserting batch starting at {i}: {e}")
-            continue
-
-    print("FoodOn graph import completed.")
-
-# name
-def main():
-    parser = argparse.ArgumentParser(description="Import FoodOn graph into Supabase.")
-    parser.add_argument(
-        "--file",
-        required=True,
-        help="Path to FoodOn OWL/TTL file (e.g. data/foodon.owl)",
-    )
-    parser.add_argument(
-        "--namespace",
-        default=None,
-        help="Optional IRI prefix to restrict to FoodOn classes only",
-    )
-    args = parser.parse_args()
-
-    import_foodon_graph(args.file, namespace_filter=args.namespace)
+    print("Done.")
 
 
 if __name__ == "__main__":
-    main()
+    # Example:
+    # python scripts/import_foodon_graph.py data/foodon.owl http://purl.obolibrary.org/obo/FOODON_
+    args = sys.argv[1:]
+    if not args:
+        raise SystemExit("Usage: python scripts/import_foodon_graph.py <path_to_owl_or_ttl> [namespace_prefix]")
+    path = args[0]
+    ns = args[1] if len(args) > 1 else None
+    import_foodon_graph(path, namespace_filter=ns)

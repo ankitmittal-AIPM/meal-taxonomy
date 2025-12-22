@@ -776,9 +776,10 @@ def ensure_tag(
     Upsert a tag and return its id.
     Compatible with supabase Python client v2.
     """
+    value_norm = (value or "").strip().lower()
     payload = {
         "tag_type_id": tag_type_id,
-        "value": value,
+        "value": value_norm,
         "label_en": label_en,
         "label_hi": label_hi,
         "label_hinglish": label_hinglish,

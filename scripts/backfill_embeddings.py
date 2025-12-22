@@ -26,12 +26,16 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=500)
     ap.add_argument("--batch", type=int, default=50)
-    ap.add_argument("--only_missing", action="store_true", default=True)
+    ap.add_argument("--all", action="store_true", help="Recompute embeddings for all canonical meals (not just NULL)")
     args = ap.parse_args()
+
+    only_missing = not args.all
 
     client = get_supabase_client()
 
     q = client.table("meals").select("id,title,search_text,embedding").eq("is_canonical", True)
+    if only_missing:
+        q = q.is_("embedding", "null")
     res = q.limit(args.limit).execute()
 
     rows = res.data or []

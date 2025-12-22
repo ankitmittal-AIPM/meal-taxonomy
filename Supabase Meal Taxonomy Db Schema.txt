@@ -1,467 +1,134 @@
-[
-  {
-    "table_name": "entity_ontology_links",
-    "column_name": "id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "entity_ontology_links",
-    "column_name": "entity_type",
-    "data_type": "text"
-  },
-  {
-    "table_name": "entity_ontology_links",
-    "column_name": "entity_id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "entity_ontology_links",
-    "column_name": "ontology_node_id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "entity_ontology_links",
-    "column_name": "confidence",
-    "data_type": "numeric"
-  },
-  {
-    "table_name": "entity_ontology_links",
-    "column_name": "source",
-    "data_type": "text"
-  },
-  {
-    "table_name": "entity_ontology_links",
-    "column_name": "extra",
-    "data_type": "jsonb"
-  },
-  {
-    "table_name": "ingredients",
-    "column_name": "id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "ingredients",
-    "column_name": "name_en",
-    "data_type": "text"
-  },
-  {
-    "table_name": "ingredients",
-    "column_name": "name_hi",
-    "data_type": "text"
-  },
-  {
-    "table_name": "ingredients",
-    "column_name": "name_hinglish",
-    "data_type": "text"
-  },
-  {
-    "table_name": "ingredients",
-    "column_name": "ontology_term_iri",
-    "data_type": "text"
-  },
-  {
-    "table_name": "ingredients",
-    "column_name": "ontology_source",
-    "data_type": "text"
-  },
-  {
-    "table_name": "ingredients",
-    "column_name": "metadata",
-    "data_type": "jsonb"
-  },
-  {
-    "table_name": "ingredients",
-    "column_name": "created_at",
-    "data_type": "timestamp with time zone"
-  },
-  {
-    "table_name": "meal_ingredients",
-    "column_name": "meal_id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "meal_ingredients",
-    "column_name": "ingredient_id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "meal_ingredients",
-    "column_name": "quantity",
-    "data_type": "numeric"
-  },
-  {
-    "table_name": "meal_ingredients",
-    "column_name": "unit",
-    "data_type": "text"
-  },
-  {
-    "table_name": "meal_ingredients",
-    "column_name": "raw_text",
-    "data_type": "text"
-  },
-  {
-    "table_name": "meal_ingredients",
-    "column_name": "metadata",
-    "data_type": "jsonb"
-  },
-  {
-    "table_name": "meal_tags",
-    "column_name": "meal_id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "meal_tags",
-    "column_name": "tag_id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "meal_tags",
-    "column_name": "confidence",
-    "data_type": "numeric"
-  },
-  {
-    "table_name": "meal_tags",
-    "column_name": "is_primary",
-    "data_type": "boolean"
-  },
-  {
-    "table_name": "meal_tags",
-    "column_name": "source",
-    "data_type": "text"
-  },
-  {
-    "table_name": "meal_tags",
-    "column_name": "created_at",
-    "data_type": "timestamp with time zone"
-  },
-  {
-    "table_name": "meals",
-    "column_name": "id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "meals",
-    "column_name": "title",
-    "data_type": "text"
-  },
-  {
-    "table_name": "meals",
-    "column_name": "title_normalized",
-    "data_type": "text"
-  },
-  {
-    "table_name": "meals",
-    "column_name": "description",
-    "data_type": "text"
-  },
-  {
-    "table_name": "meals",
-    "column_name": "instructions",
-    "data_type": "text"
-  },
-  {
-    "table_name": "meals",
-    "column_name": "source",
-    "data_type": "text"
-  },
-  {
-    "table_name": "meals",
-    "column_name": "external_source",
-    "data_type": "text"
-  },
-  {
-    "table_name": "meals",
-    "column_name": "external_id",
-    "data_type": "text"
-  },
-  {
-    "table_name": "meals",
-    "column_name": "language_code",
-    "data_type": "text"
-  },
-  {
-    "table_name": "meals",
-    "column_name": "cook_time_minutes",
-    "data_type": "integer"
-  },
-  {
-    "table_name": "meals",
-    "column_name": "prep_time_minutes",
-    "data_type": "integer"
-  },
-  {
-    "table_name": "meals",
-    "column_name": "total_time_minutes",
-    "data_type": "integer"
-  },
-  {
-    "table_name": "meals",
-    "column_name": "servings",
-    "data_type": "numeric"
-  },
-  {
-    "table_name": "meals",
-    "column_name": "created_at",
-    "data_type": "timestamp with time zone"
-  },
-  {
-    "table_name": "meals",
-    "column_name": "updated_at",
-    "data_type": "timestamp with time zone"
-  },
-  {
-    "table_name": "meals",
-    "column_name": "meta",
-    "data_type": "jsonb"
-  },
-  {
-    "table_name": "ontology_nodes",
-    "column_name": "id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "ontology_nodes",
-    "column_name": "iri",
-    "data_type": "text"
-  },
-  {
-    "table_name": "ontology_nodes",
-    "column_name": "label",
-    "data_type": "text"
-  },
-  {
-    "table_name": "ontology_nodes",
-    "column_name": "source",
-    "data_type": "text"
-  },
-  {
-    "table_name": "ontology_nodes",
-    "column_name": "kind",
-    "data_type": "text"
-  },
-  {
-    "table_name": "ontology_nodes",
-    "column_name": "extra",
-    "data_type": "jsonb"
-  },
-  {
-    "table_name": "ontology_relations",
-    "column_name": "id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "ontology_relations",
-    "column_name": "subject_id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "ontology_relations",
-    "column_name": "predicate",
-    "data_type": "text"
-  },
-  {
-    "table_name": "ontology_relations",
-    "column_name": "object_id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "ontology_relations",
-    "column_name": "source",
-    "data_type": "text"
-  },
-  {
-    "table_name": "ontology_relations",
-    "column_name": "extra",
-    "data_type": "jsonb"
-  },
-  {
-    "table_name": "tag_ontology_links",
-    "column_name": "id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "tag_ontology_links",
-    "column_name": "tag_id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "tag_ontology_links",
-    "column_name": "ontology_node_id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "tag_ontology_links",
-    "column_name": "relation",
-    "data_type": "text"
-  },
-  {
-    "table_name": "tag_ontology_links",
-    "column_name": "source",
-    "data_type": "text"
-  },
-  {
-    "table_name": "tag_types",
-    "column_name": "id",
-    "data_type": "integer"
-  },
-  {
-    "table_name": "tag_types",
-    "column_name": "name",
-    "data_type": "text"
-  },
-  {
-    "table_name": "tag_types",
-    "column_name": "description",
-    "data_type": "text"
-  },
-  {
-    "table_name": "tag_types",
-    "column_name": "created_at",
-    "data_type": "timestamp with time zone"
-  },
-  {
-    "table_name": "tags",
-    "column_name": "id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "tags",
-    "column_name": "tag_type_id",
-    "data_type": "integer"
-  },
-  {
-    "table_name": "tags",
-    "column_name": "value",
-    "data_type": "text"
-  },
-  {
-    "table_name": "tags",
-    "column_name": "label_en",
-    "data_type": "text"
-  },
-  {
-    "table_name": "tags",
-    "column_name": "label_hi",
-    "data_type": "text"
-  },
-  {
-    "table_name": "tags",
-    "column_name": "label_hinglish",
-    "data_type": "text"
-  },
-  {
-    "table_name": "tags",
-    "column_name": "ontology_source",
-    "data_type": "text"
-  },
-  {
-    "table_name": "tags",
-    "column_name": "ontology_term_iri",
-    "data_type": "text"
-  },
-  {
-    "table_name": "tags",
-    "column_name": "external_source",
-    "data_type": "text"
-  },
-  {
-    "table_name": "tags",
-    "column_name": "external_id",
-    "data_type": "text"
-  },
-  {
-    "table_name": "tags",
-    "column_name": "metadata",
-    "data_type": "jsonb"
-  },
-  {
-    "table_name": "tags",
-    "column_name": "parent_id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "tags",
-    "column_name": "created_at",
-    "data_type": "timestamp with time zone"
-  },
-  {
-    "table_name": "user_meal_interactions",
-    "column_name": "id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "user_meal_interactions",
-    "column_name": "user_id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "user_meal_interactions",
-    "column_name": "meal_id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "user_meal_interactions",
-    "column_name": "interaction_type",
-    "data_type": "text"
-  },
-  {
-    "table_name": "user_meal_interactions",
-    "column_name": "rating",
-    "data_type": "numeric"
-  },
-  {
-    "table_name": "user_meal_interactions",
-    "column_name": "created_at",
-    "data_type": "timestamp with time zone"
-  },
-  {
-    "table_name": "user_tag_preferences",
-    "column_name": "id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "user_tag_preferences",
-    "column_name": "user_id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "user_tag_preferences",
-    "column_name": "tag_id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "user_tag_preferences",
-    "column_name": "weight",
-    "data_type": "numeric"
-  },
-  {
-    "table_name": "user_tag_preferences",
-    "column_name": "updated_at",
-    "data_type": "timestamp with time zone"
-  },
-  {
-    "table_name": "users",
-    "column_name": "id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "users",
-    "column_name": "auth_user_id",
-    "data_type": "uuid"
-  },
-  {
-    "table_name": "users",
-    "column_name": "display_name",
-    "data_type": "text"
-  },
-  {
-    "table_name": "users",
-    "column_name": "email",
-    "data_type": "text"
-  },
-  {
-    "table_name": "users",
-    "column_name": "created_at",
-    "data_type": "timestamp with time zone"
-  }
-]
+Supabase Meal Taxonomy DB Schema
+================================
+
+Source of truth
+---------------
+The authoritative schema is defined by the SQL migrations in:
+
+  migrations/
+    - 000_base_schema.sql
+    - 001_meal_brain_and_search.sql
+    - 002_search_doc_and_match.sql
+    - 003_rls_policies.sql
+
+This file is a human-friendly overview (kept in sync with migrations).
+
+Core tables
+-----------
+
+meals (canonical meals)
+  - id (uuid, PK)
+  - title, title_normalized
+  - description, instructions
+  - source, external_source, external_id
+  - language_code
+  - prep_time_minutes, cook_time_minutes, total_time_minutes, servings
+  - is_canonical (bool), canonical_meal_id (uuid FK -> meals.id)
+  - search_text (text), search_tsv (tsvector), embedding (vector(384))
+  - meta (jsonb), created_at, updated_at
+
+meal_variants (source-specific rows / duplicates)
+  - id (uuid, PK)
+  - meal_id (uuid FK -> meals.id)
+  - source_type, source_id (unique pair)
+  - raw_title, raw_description, raw_ingredients, raw_instructions
+  - normalized_title, normalized_ingredients, normalized_instructions
+  - derived_* fields (diet/course/spice/etc)
+  - embedding (vector(384)), meta (jsonb), created_at, updated_at
+
+meal_synonyms
+  - id (uuid, PK)
+  - meal_id (uuid FK -> meals.id)
+  - synonym, language_code, source
+  - unique (meal_id, synonym, source)
+
+ingredients
+  - id (uuid, PK)
+  - name_en, name_normalized, language_code
+  - meta, created_at
+
+meal_ingredients (join)
+  - id (uuid, PK)
+  - meal_id (uuid FK -> meals.id)
+  - ingredient_id (uuid FK -> ingredients.id)
+  - quantity, unit, raw_text, metadata
+  - unique (meal_id, ingredient_id)
+
+tag_types
+  - id (int, PK)
+  - name (unique), description, created_at
+
+tags
+  - id (uuid, PK)
+  - tag_type_id (int FK -> tag_types.id)
+  - parent_id (uuid FK -> tags.id)
+  - value, label_en/hi/hinglish
+  - unique (tag_type_id, value)
+  - created_at, updated_at
+
+meal_tags (join)
+  - id (uuid, PK)
+  - meal_id (uuid FK -> meals.id)
+  - tag_id (uuid FK -> tags.id)
+  - confidence, is_primary, source, created_at
+  - unique (meal_id, tag_id)
+
+Ontology tables
+---------------
+ontology_nodes
+  - id (uuid, PK), iri (unique), label, definition, synonyms(jsonb), node_type, created_at
+
+ontology_relations
+  - id (uuid, PK)
+  - subject_id (FK -> ontology_nodes.id)
+  - predicate_iri, object_id (FK -> ontology_nodes.id)
+  - unique (subject_id, predicate_iri, object_id)
+
+entity_ontology_links
+  - id (uuid, PK)
+  - entity_type, entity_id, ontology_node_id, relation (not null default '')
+  - unique (entity_type, entity_id, ontology_node_id, relation)
+
+tag_ontology_links
+  - id (uuid, PK)
+  - tag_id, ontology_node_id, relation (not null default '')
+  - unique (tag_id, ontology_node_id, relation)
+
+User personalization tables
+---------------------------
+users
+  - id (uuid, PK)
+  - auth_user_id (uuid, unique)
+  - display_name, email, created_at
+
+user_tag_preferences
+  - id (uuid, PK)
+  - user_id (FK -> users.id)
+  - tag_id (FK -> tags.id)
+  - weight, updated_at
+  - unique (user_id, tag_id)
+
+user_meal_interactions
+  - id (uuid, PK)
+  - user_id (FK -> users.id)
+  - meal_id (FK -> meals.id)
+  - interaction_type, rating, notes, created_at
+
+RPC functions
+-------------
+search_meals_v2(query_text, diet_value, meal_type_value, region_value, limit_n)
+  - Full-text + trigram hybrid search over meals (canonical only).
+
+match_canonical_meals(query_embedding, match_threshold, match_count)
+  - Vector similarity search over meals.embedding (canonical only).
+
+refresh_meal_search_doc(target_meal_id)
+  - Aggregates synonyms + tags + ingredients into meals.search_text, which
+    feeds meals.search_tsv via trigger.
+
+RLS
+---
+See migrations/003_rls_policies.sql for policies. In short:
+  - Catalog tables are readable by anon/authenticated.
+  - user_* tables are scoped to auth.uid().
+  - Service role bypasses RLS for ingestion/backfills.

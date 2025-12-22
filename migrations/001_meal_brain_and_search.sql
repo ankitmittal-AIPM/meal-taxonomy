@@ -59,9 +59,28 @@ create index if not exists idx_meals_search_tsv on public.meals using gin (searc
 create index if not exists idx_meals_title_trgm on public.meals using gin (title_normalized gin_trgm_ops);
 
 -- Optional vector index (only useful once you populate embeddings)
-create index if not exists idx_meals_embedding_ivfflat
-on public.meals using ivfflat (embedding vector_cosine_ops)
-with (lists = 100);
+-- NOTE: ivfflat works best after you have a decent amount of vectors.
+-- Also, ivfflat requires an operator class; vector_cosine_ops is used below.
+do $$
+begin
+  -- Only attempt if the column exists (it will if vector extension is available)
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema='public' and table_name='meals' and column_name='embedding'
+  ) then
+    begin
+      execute $sql$
+        create index if not exists idx_meals_embedding_ivfflat
+        on public.meals using ivfflat (embedding vector_cosine_ops)
+        with (lists = 100)
+      $sql$;
+    exception when others then
+      -- If ivfflat isn't supported in this environment or vector isn't enabled, skip.
+      null;
+    end;
+  end if;
+end $$;
 
 -- -------------------------------------------------------------------
 -- Meal variants table (provenance + dedupe)
@@ -152,7 +171,7 @@ create or replace function public.search_meals_v2(
   diet_value text default null,
   meal_type_value text default null,
   region_value text default null,
-  limit integer default 20
+  result_limit integer default 20
 )
 returns table (
   id uuid,
@@ -162,11 +181,14 @@ returns table (
   title_normalized text
 )
 language plpgsql
+stable
 as $$
 declare
   q text;
+  q_norm text;
 begin
   q := coalesce(query_text, '');
+  q_norm := regexp_replace(lower(q), '\s+', ' ', 'g');
 
   return query
   with base as (
@@ -178,11 +200,11 @@ begin
       -- Full-text score (0..1-ish)
       ts_rank(m.search_tsv, plainto_tsquery('simple', q)) as fts_rank,
       -- Trigram similarity (0..1)
-      similarity(coalesce(m.title_normalized,''), regexp_replace(lower(q), '\s+', ' ', 'g')) as tri_sim
+      similarity(coalesce(m.title_normalized,''), q_norm) as tri_sim
     from public.meals m
     where (
       m.search_tsv @@ plainto_tsquery('simple', q)
-      or coalesce(m.title_normalized,'') % regexp_replace(lower(q), '\s+', ' ', 'g')
+      or coalesce(m.title_normalized,'') % q_norm
     )
     and (
       diet_value is null or exists (
@@ -220,6 +242,7 @@ begin
     title_normalized
   from base
   order by score desc
-  limit public.search_meals_v2.limit;
+  limit result_limit;
+
 end;
 $$;

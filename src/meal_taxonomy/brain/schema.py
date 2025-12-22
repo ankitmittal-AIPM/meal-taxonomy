@@ -14,8 +14,10 @@ Purpose:
 
     Nothing in this module talks to Supabase directly.
 
-Purpose:
-  Pydantic models / dataclasses for:
+    The goal is to keep these dataclasses stable so that each layer can evolve
+    independently without breaking the end-to-end pipeline.
+
+Objects:
       - RawMeal (unified input)
       - EnrichedMealVariant (output of enrichment pipeline)
 
@@ -26,29 +28,29 @@ Purpose:
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    # Imported only for type checking to avoid pulling optional heavy deps
+    # (e.g., transformers) on import of this module.
+    from src.meal_taxonomy.nlp_tagging import TagCandidate
 
 
 @dataclass
 class RawMeal:
-    """
-    RawMeal represents a meal as it appears in a single source
-    (CSV row, user form, chat-extracted recipe, etc.)
+    """Unified input payload for a meal (dataset row, user form, chat parse, etc.)."""
 
-    Unified meal record from any source:
-      - Kaggle CSV / FoodOn / scraped sources
-      - future user-submitted meals (form or chat)
-    """
+    # Provenance / source identity
+    source_type: str               # e.g. "Kaggle:indian_food" or "user_form"
+    source_id: str                 # dataset-specific key / external id
 
-    source_type: str          # e.g. "kaggle_indian_full", "user_form", "user_chat"
-    source_id: str            # row id / unique key in that source
-
+    # Core text fields
     name: str
     description: Optional[str]
+    ingredients_text: str
+    instructions_text: str
 
-    ingredients_text: str     # free-text ingredients (possibly messy)
-    instructions_text: str    # free-text instructions
-
+    # Optional structured metadata
     cuisine: Optional[str] = None
     course: Optional[str] = None
     diet: Optional[str] = None
@@ -57,42 +59,30 @@ class RawMeal:
     cook_time_mins: Optional[float] = None
     total_time_mins: Optional[float] = None
     servings: Optional[float] = None
-    language_code: str = "en"
 
+    # Any additional info from dataset/user (region, flavor, images, urls, etc.)
     extra: Dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
 class EnrichedMealVariant:
-    """
-    EnrichedMealVariant is the "brain-ready" version of RawMeal.
-
-    It contains:
-      - cleaned / normalized text fields,
-      - ML/LLM predictions (course, diet, region, spice, description, etc.),
-      - embedding for similarity search,
-      - tag candidates to feed into Meal Taxonomy (tags + meal_tags).
-
-    Output of enrichment pipeline.
-    This is the object you pass to Meal Brain.
-
-    NOTE:
-      - embeddings are stored as list[float] for supabase-py JSON serialization.
-      - tags are stored separately in the taxonomy pipeline.
-    """
+    """Output of the enrichment pipeline for a given RawMeal."""
 
     raw: RawMeal
 
-    # Cleaned text
+    # Canonicalization results
     canonical_name: str
     alt_names: List[str]
+
+    # Cleaned/normalized fields
     ingredients_norm: str
     instructions_norm: str
 
-    # Predictions
+    # Derived features / predictions
     predicted_course: Optional[str]
     predicted_diet: Optional[str]
     region_tags: List[str]
+
     spice_level: Optional[int]
     difficulty: Optional[str]
     kids_friendly: Optional[bool]
@@ -101,14 +91,15 @@ class EnrichedMealVariant:
     health_tags: List[str]
     utensil_tags: List[str]
 
-    # Time & servings
+    # Time signals (can be filled from dataset or predicted)
     prep_time_mins: Optional[float]
     cook_time_mins: Optional[float]
     total_time_mins: Optional[float]
     servings: Optional[float]
 
     # NLP / tagging outputs
-    tag_candidates: Dict[str, List[str]]  # tag_type -> list of tag values
+    # tag_candidates: Dict[str, List[str]]  # tag_type -> list of tag values
+    tag_candidates: List["TagCandidate"]  # unified TagCandidate list across layers
 
     # Embedding for similarity search/dedupe
     embedding: Optional[List[float]] = None
@@ -117,4 +108,4 @@ class EnrichedMealVariant:
     extra: Dict[str, object] = field(default_factory=dict)
 
     # For observability / debugging
-    debug: Dict[str, Any]
+    debug: Dict[str, Any] = field(default_factory=dict)

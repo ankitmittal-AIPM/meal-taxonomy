@@ -1,163 +1,102 @@
+# Meal Taxonomy
 
-# 🍽️ Meal-Taxonomy  
-### *The Intelligence Layer for Indian Meals, Recipes & Personalized Food Recommendations*
+Meal‑Taxonomy is a Supabase + Python backend that builds a searchable, canonical meal catalog from noisy sources (datasets, user submissions, scraped recipes) and enriches it with tags, synonyms, and embeddings.
 
-## 📌 Overview
-Meal‑Taxonomy is a full-stack **knowledge graph + ontology-powered ETL engine** built to understand **Indian food**, its **ingredients**, **regional variations**, **meal types**, **nutritional patterns**, and **user cooking behavior**.
+It contains three main subsystems:
 
-This project powers a "Netflix-for-Food" experience using:
-- Ontologies (FoodOn)
-- NLP Tagging (HuggingFace TASTEset NER)
-- Recipe datasets (Kaggle Indian Foods, RecipeDB, FKG)
-- Category root discovery
-- Semantic search
-- Supabase backend
+1. **Enrichment** (`src/meal_taxonomy/enrichment/`)
+   - Layer‑0: rules / NLP heuristics (tags, normalization, region inference)
+   - Layer‑1: optional ML models (classification, derived signals)
+   - Layer‑2: optional LLM enrichment (alt names, cuisine guesses, structured extras)
 
----
+2. **Meal Brain** (`src/meal_taxonomy/brain/`)
+   - Dedupes and upserts a **canonical meal** + a **source variant**
+   - Writes synonyms + “tag type + tag value” inventory
+   - Leaves join-table attachment (`meal_tags`, `meal_ingredients`) to ETL
 
-# 🧭 Vision & Purpose
-The goal is to enable Indian households — especially working women, mothers, and household cooks — to:
-- Plan meals intelligently  
-- Balance nutrition  
-- Discover new recipes  
-- Automate meal suggestions  
-- Get personalized recommendations  
-- Understand their cooking patterns  
-- Maintain variety & health balance  
-
-This is achieved using:
-- Ingredient taxonomy  
-- Meal tagging  
-- Ontology graph traversal  
-- NLP extraction  
-- Semantic embeddings (future)  
-- Meal similarity graph  
+3. **ETL** (`src/meal_taxonomy/etl/`)
+   - Loads datasets, calls enrichment + brain upsert, then attaches join rows
+   - Refreshes `meals.search_text` for better search relevance
 
 ---
 
-# 🧩 Core Features
+## Quick start
 
-| Feature | Description |
-|--------|-------------|
-| **Ontology Import (FoodOn)** | Converts global food ontology into Supabase knowledge graph |
-| **Ingredient Normalization** | Maps synonyms → canonical ingredient → FoodOn node |
-| **Ingredient Category Tagging** | Grain, Pulse, Vegetable, Dairy, Meat, Spice, etc |
-| **Meal Tagging** | Cuisine, region, taste, cooking method, complexity, meal time |
-| **NLP Tagging** | TASTEset NER extracts diet, taste, cooking process, time |
-| **ETL Pipelines** | Kaggle → Clean → Tag → Insert into Supabase |
-| **Search & Recommendation** | Filter meals by category, time, region, taste, health |
+### 1) Install
 
----
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-# 🏗️ Architecture Diagram
+### 2) Configure env
 
-```mermaid
-flowchart TD
-    A[Raw Recipe Datasets] --> B[ETL Pipeline]
-    B --> C[Ontology Layer - FoodOn]
-    C --> D[Ingredient Normalization]
-    D --> E[Ingredient Category Tagging]
-    E --> F[Meal Tagging - NLP + Rules]
-    F --> G[Supabase Database]
-    G --> H[Search + Recommendation Engine]
-    H --> I[Client Apps - Mobile/Web]
+Create a `.env` file:
+
+```bash
+SUPABASE_URL="https://<project>.supabase.co"
+SUPABASE_SERVICE_ROLE_KEY="<service role key>"
+# Optional (LLM enrichment)
+OPENAI_API_KEY="<optional>"
+```
+
+### 3) Apply migrations
+
+In Supabase SQL editor (or `supabase db push` if you use the CLI), apply:
+
+- `migrations/000_base_schema.sql`
+- `migrations/001_meal_brain_and_search.sql`
+- `migrations/002_search_doc_and_match.sql`
+- `migrations/003_rls_policies.sql`
+
+> `migrations/` is the source of truth for the schema.
+
+### 4) Seed taxonomy tag types
+
+```bash
+python scripts/seed_taxonomy.py
+```
+
+### 5) Ingest a dataset
+
+Indian Kaggle CSV example:
+
+```bash
+python scripts/etl_run.py --indian-csv data/indian_food.csv --limit 200
 ```
 
 ---
 
-# 🗂️ Repo Structure
+## Search
 
-```
-meal-taxonomy/
-  ├── scripts/
-  │     ├── etl_run.py
-  │     ├── debug_foodon_categories.py
-  │     └── import_foodon_graph.py
-  ├── src/
-  │   └── meal_taxonomy/
-  │         ├── nlp/
-  │         ├── etl/
-  │         ├── ontologies/
-  │         ├── db/
-  │         └── utils/
-  ├── data/
-  ├── README.md
-  ├── CONTRIBUTING.md
-  ├── SYSTEM_DESIGN.md
-  ├── API_DOCS.md
-  └── ARCHITECTURE.md
+The recommended query path is the RPC:
+
+- `public.search_meals_v2(query_text, diet_value, meal_type_value, region_value, limit_n)`
+
+Example:
+
+```bash
+python scripts/search_example.py --q "paneer curry" --limit 10
 ```
 
 ---
 
-# 📐 Ingredient Category Roots (Indian Context)
+## Recommendations
 
-| Root | Examples | Purpose |
-|------|----------|----------|
-| staple_grain | rice, roti, millets | satiety, carbs |
-| pulse_legume | dal, rajma, chole | protein for veg households |
-| vegetable | sabzi veg, leafy greens | micronutrients |
-| fruit | banana, mango | snacks & desserts |
-| dairy | paneer, ghee, curd | fat & protein |
-| egg | omelette, egg curry | quick protein |
-| meat | chicken, mutton | non‑veg dietary habits |
-| seafood | fish, prawns | coastal diets |
-| oil_fat | oils, butter | health patterns |
-| nut_seed | cashew, almond | high-nutrient |
-| spice_condiment | masalas | taste profile |
-| sweetener | sugar, jaggery | diabetic lens |
+A baseline recommender is available in:
+
+- `src/meal_taxonomy/recommendation/recommender.py`
+
+Example:
+
+```bash
+python -m src.meal_taxonomy.recommendation.recommendation_example --user-id <uuid> --limit 10
+```
 
 ---
 
-# 🧪 NLP Tagging
-- Uses **dmargutierrez/distilbert-base-uncased-TASTESet-ner**
-- Extracts:
-  - DIET: vegetarian, vegan, Jain  
-  - PROCESS: frying, tempering, steaming  
-  - TASTE: spicy, sweet, tangy  
-  - TIME: “cook 10 minutes”  
-- Converts into tags → Supabase
+## Notes
 
----
-
-# 🛢️ Supabase Schema (Simplified)
-
-| Table | Purpose |
-|-------|---------|
-| **meals** | main meals/recipes |
-| **ingredients** | normalized ingredients |
-| **meal_ingredients** | mapping table |
-| **tag_types** | category of tag |
-| **tags** | actual tag value |
-| **meal_tags** | meal ↔ tag mapping |
-| **ontology_nodes** | FoodOn nodes |
-| **ontology_relations** | graph edges |
-| **entity_ontology_links** | ingredient → ontology term |
-
----
-
-# 📝 Contributing
-See **CONTRIBUTING.md**
-
----
-
-# 🧩 System Design
-See **SYSTEM_DESIGN.md**
-
----
-
-# 🔌 API Docs
-See **API_DOCS.md**
-
----
-
-# 🧱 Architecture Document
-See **ARCHITECTURE.md**
-
----
-
-# ❤️ Author
-**Ankit Mittal**  
-AI Product Manager  
-India  
-
+- Ingestion/backfills should use **service role** (bypasses RLS).
+- Client apps should use **anon/authenticated** keys and rely on RLS policies + RPCs.

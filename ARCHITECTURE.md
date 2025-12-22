@@ -11,7 +11,7 @@
 | Tagging Engine | Category + Meal tagging |
 | Database Layer | Supabase |
 | Search Layer | RPC-based search |
-| Recommendation Layer | ML similarity graph (future) |
+| Recommendation Layer | Tag + embedding recommender (baseline), optional LLM explanations |
 
 ---
 
