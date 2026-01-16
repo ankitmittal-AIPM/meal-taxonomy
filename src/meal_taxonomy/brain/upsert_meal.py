@@ -72,6 +72,8 @@ MODULE_PURPOSE = (
 
 logger = get_logger("brain_upsert")
 
+# Purpose: Convert tag candidates to JSON-serializable dicts for Supabase JSON columns. 
+# This further helps in storing tag candidates in a structured format in meta structure and makes it easy to query and analyze later.
 def _serialize_tag_candidates(tag_candidates: Any) -> List[Dict[str, Any]]:
     """Convert tag candidates to JSON-serializable dicts for Supabase JSON columns."""
     out: List[Dict[str, Any]] = []
@@ -121,10 +123,7 @@ T_SAME = 0.85       # confidently same canonical dish
 T_MAYBE = 0.70      # plausible match; attach variant but mark needs_review
 
 # Invoked Address: Main entry --> Upsert a canonical meal + variant given an enriched meal variant
-def upsert_meal(
-    enriched: EnrichedMealVariant,
-    client: Optional[Client] = None,
-) -> Tuple[str, str, str]:
+def upsert_meal( enriched: EnrichedMealVariant, client: Optional[Client] = None,) -> Tuple[str, str, str]:
     """
     Main entry --> Upsert a canonical meal + variant given an enriched meal variant
 
@@ -154,15 +153,13 @@ def upsert_meal(
         )
         return existing["meal_id"], existing["id"], "existing_variant"
 
-    # raw = enriched.raw
-
     # 1) Find candidates (fast DB-side search where possible)
     candidates = _find_candidate_meals(enriched, client, k=20)
 
     # 2) Pick best match by explainable scoring
     best, best_score = _pick_best_candidate(enriched, candidates)
 
-    # 3) Decide canonical meal id
+    # 3) Decide new or get existing canonical meal id
     if best is not None and best_score >= T_SAME:
         meal_id = best["id"]
         status = "attached_as_variant"
@@ -181,7 +178,9 @@ def upsert_meal(
 
     # 5) Upsert synonyms (optional table; safe no-op if table missing)
     _attach_synonyms(meal_id, enriched, client)
-    _attach_tags(meal_id, enriched, client)
+
+    # 6) Create new tags in Tags DB from canonical meal using existing taxonomy seed helpers
+    _create_tags(meal_id, enriched, client)
 
     # Successful insertion of new meal with dedupe and variant's check
     logger.info(
@@ -205,6 +204,7 @@ def upsert_meal(
 # ----------------------------------------------------------------------
 # Existing variant lookup
 # Purpose: Check if a meal_variant row already exists for this source_type+source_id to ensure idempotency.
+# To Do: How to handle cases where multiple records of same meal present in the same file
 # ----------------------------------------------------------------------
 def _get_existing_variant(enriched: EnrichedMealVariant, client: Client) -> Optional[Dict[str, Any]]:
     """Return existing meal_variants row for this source if present."""
@@ -238,11 +238,7 @@ def _get_existing_variant(enriched: EnrichedMealVariant, client: Client) -> Opti
 # Candidate lookup & scoring
 # Purpose: Find candidate canonical meals using fast DB-side search (RPC or ILIKE). Gives best 20 results that has ben set as value of "k"
 # ----------------------------------------------------------------------
-def _find_candidate_meals(
-    enriched: EnrichedMealVariant,
-    client: Client,
-    k: int = 20,
-) -> List[Dict[str, Any]]:
+def _find_candidate_meals(enriched: EnrichedMealVariant, client: Client, k: int = 20,) -> List[Dict[str, Any]]:
     """Find candidate canonical meals.
 
     Preferred path:
@@ -332,12 +328,9 @@ def _find_candidate_meals(
             },
         )
         return []
-
+    
 # Find the candidate that is most similar to enriched meal
-def _pick_best_candidate(
-    enriched: EnrichedMealVariant,
-    candidates: List[Dict[str, Any]],
-) -> Tuple[Optional[Dict[str, Any]], float]:
+def _pick_best_candidate(enriched: EnrichedMealVariant, candidates: List[Dict[str, Any]],) -> Tuple[Optional[Dict[str, Any]], float]:
     cands = list(candidates)
     if not cands:
         return None, 0.0
@@ -348,6 +341,7 @@ def _pick_best_candidate(
 
     best: Optional[Dict[str, Any]] = None
     best_score = -1.0
+    # Get the best candidate based on score iteratively
     for cand in candidates:
         score = _score_candidate(enriched, cand, min_rpc_score=min_rpc_score, max_rpc_score=max_rpc_score)
         if score > best_score:
@@ -420,7 +414,7 @@ def _insert_new_canonical(enriched: EnrichedMealVariant, client: Client) -> str:
         "external_source": enriched.raw.source_type,
         # "external_id": str(uuid.uuid4()),
         "external_id": enriched.raw.source_id,
-        "language_code": "en",
+        "language_code": enriched.raw.language_code if enriched.raw.language_code else "en",
         "cook_time_minutes": int(enriched.cook_time_mins) if enriched.cook_time_mins is not None else None,
         "prep_time_minutes": int(enriched.prep_time_mins) if enriched.prep_time_mins is not None else None,
         # "total_time_minutes": int(enriched.total_time_mins) if enriched.total_time_mins is not None else None,
@@ -452,42 +446,27 @@ def _insert_new_canonical(enriched: EnrichedMealVariant, client: Client) -> str:
         "search_text": None,  # filled by refresh_meal_search_doc() after tags/synonyms attach
     }
 
-    # Optional: store embedding if the DB schema has it.
-    if enriched.embedding:
-        payload["embedding"] = enriched.embedding
-
     # Insert with a safe fallback (in case embedding column is missing)
     try:
         resp = client.table("meals").insert(payload).execute()
         row = (resp.data or [])[0]
         return row["id"]
     except Exception as exc:  # noqa: BLE001
-        if "embedding" in payload:
-            payload.pop("embedding", None)
-            resp = client.table("meals").insert(payload).execute()
-            row = (resp.data or [])[0]
-            logger.warning(
-                "Inserted canonical meal without embedding column (schema missing embedding?): %s",
-                exc,
-                extra={
-                    "invoking_func": "_insert_new_canonical",
-                    "invoking_purpose": MODULE_PURPOSE,
-                    "next_step": "Continue without embeddings",
-                    "resolution": "",
-                    "run_id": RUN_ID,
-                },
-            )
-            return row["id"]
-        raise
-
-
-def _upsert_variant(
-    meal_id: str,
-    enriched: EnrichedMealVariant,
-    client: Client,
-    *,
-    needs_review: bool = False,
-) -> str:
+        # If meal doesn't exist, give a clear log and return a placeholder.
+        logger.error(
+            "Failed to upsert canonical meal: %s",
+            exc,
+            extra={
+                "invoking_func": "_insert_new_canonical",
+                "invoking_purpose": MODULE_PURPOSE,
+                "next_step": "Create canonical meal in meal table and rerun",
+                "resolution": "check meal payload",
+                "run_id": RUN_ID,
+            },
+        )
+        return ""
+    
+def _upsert_variant( meal_id: str, enriched: EnrichedMealVariant, client: Client, *, needs_review: bool = False,) -> str:
     """Upsert a meal_variants row (idempotent by source_type+source_id)."""
     payload: Dict[str, Any] = {
         "meal_id": meal_id,
@@ -507,6 +486,7 @@ def _upsert_variant(
         #"total_time_minutes": enriched.total_time_mins,
         "servings": enriched.servings,
         "needs_review": needs_review,
+        "embedding": enriched.embedding,
         "meta": {
             "tag_candidates": _serialize_tag_candidates(enriched.tag_candidates),
             "region_tags": enriched.region_tags,
@@ -519,9 +499,6 @@ def _upsert_variant(
             "extra": enriched.extra or {},
         },
     }
-
-    if enriched.embedding:
-        payload["embedding"] = enriched.embedding
 
     try:
         resp = client.table("meal_variants").upsert(
@@ -562,18 +539,15 @@ def _maybe_update_canonical(
     _ = canonical_meal_id, enriched, client
     return
 
-# Purpose: Attach tags to canonical meal using existing taxonomy seed helpers.
-def _attach_tags(
-    canonical_meal_id: str,
-    enriched: EnrichedMealVariant,
-    client: Client,
-) -> None:
+# Purpose: Insert new tags in Tags DB from canonical meal using existing taxonomy seed helpers.
+# It DOESN'T link them to meal_tags table; that is done elsewhere in the pipeline.
+def _create_tags(canonical_meal_id: str, enriched: EnrichedMealVariant, client: Client,) -> None:
     """
-    Attach tags to the canonical meal using existing taxonomy seed helpers.
+    Create new tags in Tags DB from canonical meal using existing taxonomy seed helpers.
     """
 
     tag_type_Ids: Dict[str, str] = {}
-    # Ensure tag types exist
+    # Ensure tag types exist i.e. Tag Type ID is there for Tag Type fetched from new canonical meal
     for tag_type in [
         "diet",
         "meal_type",
@@ -597,7 +571,7 @@ def _attach_tags(
             pass
 
     # Insert specific tags (minimal: use ensure_tag which upserts tags)
-    # NOTE: actual linking into meal_tags is done elsewhere in your pipeline.
+    # NOTE: ACTUAL LINKING of Tags into meal_tags is done elsewhere in your pipeline.
     # Here we just ensure tags exist.
     if enriched.predicted_diet:
         tag_type_id = tag_type_Ids.get("diet")

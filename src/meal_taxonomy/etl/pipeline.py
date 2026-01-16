@@ -329,6 +329,9 @@ class MealETL:
 
         self._safe_bulk_upsert("meal_tags", rows, on_conflict="meal_id,tag_id")
 
+    # Purpose: Refresh search document to include new meal data in search index. This ensures that any search queries will consider the newly ingested meal.
+    # This builds meals.search_text (and therefore meals.search_tsv via trigger) for a given meal. The search_text is used for full-text search functionality in the database.
+    # Very important for search indexing in DB
     def refresh_search_doc(self, meal_id: str) -> None:
         """
         Rebuild meals.search_text (and therefore meals.search_tsv via trigger) for a given meal.
@@ -345,7 +348,6 @@ class MealETL:
     # End-to-end ingest
     # Invoked Address : ingest_records within this file, once records are read from csv/external files on meals
     # Converts each record in datatable of recipe record to Rawmeal
-    # 
     # -----------------------------------------------------
     def ingest_recipe(self, record: RecipeRecord, *, refresh_search: bool = True) -> dict:
         """
@@ -393,6 +395,7 @@ class MealETL:
         self.attach_ingredients(meal_id, enriched.ingredients_norm)
         self.attach_tags(meal_id, enriched.tag_candidates)
 
+        # Create Search Document for the newly ingested meal i.e.search indexing in DB
         if refresh_search:
             self.refresh_search_doc(meal_id)
 
@@ -429,6 +432,8 @@ class MealETL:
 
 
 # Invoked Address : From etl_run.py script to load the indian dataset
+# To Do: Check for Hugging Face Warning here in MealETL class object initialization
+# To Do: Remove redundant functions loading dataframes from csv and calling MealETL.ingest_records for indian kaggle dataset and kaggle all dataset
 def ingest_indian_kaggle(
     csv_path: str,
     *,
@@ -448,7 +453,6 @@ def ingest_indian_kaggle(
     records = load_indian_kaggle_csv(csv_path, limit=limit)
     # Invokes ingestion of complete Record recipe in DB
     etl.ingest_records(records)
-
 
 def ingest_kaggle_all(csv_path: str, *, limit: Optional[int] = None) -> None:
     """

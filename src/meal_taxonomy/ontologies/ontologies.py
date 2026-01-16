@@ -192,12 +192,7 @@ def _load_foodon_synonyms(tsv_path: Path) -> List[Tuple[str, str]]:
     return rows
 
 
-def _upsert_foodon_node(
-    client: Client,
-    iri: str,
-    label: str,
-    kind: str = "ingredient_class",
-) -> str:
+def _upsert_foodon_node(client: Client, iri: str, label: str, kind: str = "ingredient_class",) -> str:
     """
     Ensure we have an ontology_nodes row for this FoodOn term.
 
@@ -221,7 +216,7 @@ def _upsert_foodon_node(
     if existing.data:
         return existing.data[0]["id"]
 
-    # 2) Insert new
+    # 2) Insert new row in ontology_nodes. Ontology_nodes have all ontology terms including FoodOn terms
     res = client.table("ontology_nodes").insert(
         {
             "iri": iri,
@@ -358,6 +353,7 @@ def link_ingredients_via_foodon_synonyms(client: Client, tsv_path: str) -> None:
         
         # Using simple substring match for now
         for term_id, blob in synonyms_rows:
+            # Checks if normalized ingredient name is a substring of the label+synonyms blob of FoodOn term
             if name_norm and name_norm in blob:
                 matches[ing_id] = term_id
                 break  # take the first match
@@ -389,6 +385,7 @@ def link_ingredients_via_foodon_synonyms(client: Client, tsv_path: str) -> None:
         iri = term_id  # in foodon-synonyms.tsv the id is already a full IRI
 
         # 1) Ensure ontology_nodes entry
+        # Inserts or fetches existing ontology_nodes row for this FoodOn term
         node_id = _upsert_foodon_node(
             client,
             iri=iri,

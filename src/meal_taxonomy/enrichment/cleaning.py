@@ -77,7 +77,6 @@ def normalize_instructions(text: Optional[str]) -> str:
     t = re.sub(r"\s+", " ", t)
     return t.strip()
 
-
 def normalize_title(title: Optional[str]) -> str:
     """Normalize a meal title for search / dedupe.
 

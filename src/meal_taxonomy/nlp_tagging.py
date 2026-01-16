@@ -89,6 +89,7 @@ class RecipeNLP:
         self._ner = None
         self._init_ner_pipeline()
 
+    # Purpose: Initializes and assign value to self._ner
     def _init_ner_pipeline(self) -> None:
         if pipeline is None:
             # transformers not installed – log and proceed with rule-based only
@@ -432,6 +433,7 @@ class RecipeNLP:
     # ------------ Rule-based taggers ------------
     # This is a helper to check if any keyword is in text and accordingly add tags.
     @staticmethod
+    # Used in rule based tags function
     def _text_contains_any(text: str, keywords: list[str]) -> bool:
         return any(kw in text for kw in keywords)
 
@@ -543,12 +545,7 @@ class RecipeNLP:
         return self._ner is not None
 
     # Purpose: Map NER entity labels to TagCandidate objects and also assign tag_type.
-    def _map_entity_to_tag(
-        self,
-        label_raw: str,
-        text: str,
-        score: float,
-    ) -> Optional[TagCandidate]:
+    def _map_entity_to_tag( self, label_raw: str, text: str, score: float,) -> Optional[TagCandidate]:
         label_norm = (label_raw or "").upper().replace(" ", "_")
         value = text.lower().strip().replace(" ", "_")
         if not value:
@@ -628,11 +625,7 @@ class RecipeNLP:
     # Entry point used by pipeline.py
     # Purpose: Combine ingredients + extra recipe text (title, instructions) and return a richer set of TagCandidates.
     # ------------------------------------------------------------------
-    def nlp_tags_for_recipe(
-        self,
-        ingredients: Sequence[str],
-        extra_text: Optional[str] = None,
-    ) -> List[TagCandidate]:
+    def nlp_tags_for_recipe( self, ingredients: Sequence[str], extra_text: Optional[str] = None,) -> List[TagCandidate]:
         """
         Combine ingredients + extra recipe text (title, instructions) and
         return a richer set of TagCandidates.
@@ -649,6 +642,7 @@ class RecipeNLP:
             return []
 
         # 1) Rule-based tags (high recall for Indian-ish phrases)
+        # To Do: Recalibrate confidence score. Make sure it's optimized so that it NER based score and rule based score are rightly considered later
         rule_tags = self.rule_based_tags(full_text)
 
         # 2) NER-based tags (if model available)
@@ -656,10 +650,13 @@ class RecipeNLP:
 
         # 3) Merge & deduplicate (keep highest confidence for each tag_type+value)
         merged: dict[tuple[str, str], TagCandidate] = {}
-
         for cand in rule_tags + ner_tags:
             key = (cand.tag_type, cand.value)
             existing = merged.get(key)
+            # To Do: Consider averaging confidence instead of just picking highest?
+            # To Do: Consider merging other fields too (is_primary, source, etc.)?
+            # To Do: Consider keeping both sources in a list?
+            # To Do: Consider adding provenance info to TagCandidate?
             if existing is None or cand.confidence > existing.confidence:
                 merged[key] = cand
 
@@ -682,46 +679,11 @@ class RecipeNLP:
     # ------------------------------------------------------------------
     # Compatibility helper (used by enrichment_pipeline.py)
     # Purpose:
-    #   Enrichment pipeline wants a (title, ingredients_text, instructions_text) interface.
-    #   Internally, our canonical NLP entrypoint is nlp_tags_for_recipe(ingredients, extra_text).
-    # ------------------------------------------------------------------
-    def generate_tag_candidates_for_recipe(
-        self,
-        title: str,
-        ingredients: str,
-        instructions: str,
-    ) -> List[TagCandidate]:
-        """Generate TagCandidate objects for a recipe.
-
-        This wrapper exists so the enrichment layer can call NLP in a simple way
-        without needing to know our internal API details.
-
-        Args:
-            title: Recipe title (string)
-            ingredients: Ingredients as a single string (comma/newline separated)
-            instructions: Instructions as a single string
-
-        Returns:
-            List[TagCandidate]
-        """
-        # Turn ingredients free-text into a list of "lines"
-        # (keeps compatibility with the existing nlp_tags_for_recipe logic)
-        parts = re.split(r"[\n,;]+", ingredients or "")
-        ing_lines = [p.strip() for p in parts if p and p.strip()]
-
-        extra_parts = [title or "", instructions or ""]
-        extra_text = "\n".join(p for p in extra_parts if p.strip())
-
-        return self.nlp_tags_for_recipe(ing_lines, extra_text=extra_text)
-
-    # ------------------------------------------------------------------
-    # Compatibility helper (used by enrichment_pipeline.py)
-    # Purpose:
     #   Some callsites have only a single free-text blob (title + ingredients + instructions combined).
     #   This helper keeps those callsites working without forcing them to pre-split ingredients.
     # Invoked Address: From _nlp_candidates in Enrichment_Pipeline file
     # ------------------------------------------------------------------
-    def tag_recipe_text(self, text: str) -> List[TagCandidate]:
+    def nlp_tag_recipe_text(self, text: str) -> List[TagCandidate]:
         """
         Tag a single free-text blob and return TagCandidate objects.
 

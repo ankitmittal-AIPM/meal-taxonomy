@@ -125,6 +125,7 @@ TOTAL_TIME_COLS = {
 TOTAL_TIME_COL_REGEX = {
      r"(?i)^(?=.*total)(?=.*time).*"
 }
+
 # Invoke Address : Called from ingest_kaggle_all.py code
 # Find relevant nomarlized column name for any un-normalized original column in dataset
 def _find_col(norm_to_orig: Dict[str, str], candidates: Set[str], regex_candidates: Optional[Iterable[str]] = None,) -> Optional[str]:
@@ -232,6 +233,7 @@ def load_kaggle_csv(path: str, dataset_name: Optional[str] = None) -> List[Recip
 
     # Parses through each record in the Kaggle Data CSV after Columns of it are normalized as per the DB requirement. This is step to read data and getting it ready to be upserted in Supabase
     for idx, row in df.iterrows():
+        
         # Title - Setting title as per the value in title_col. if no such column found in csv file then it sets that records as Receipe with some id like Recipe 132 (random id)
         title = str(row[title_col]).strip() if title_col else f"Recipe {idx}"
 

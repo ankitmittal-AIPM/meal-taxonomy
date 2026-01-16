@@ -777,17 +777,8 @@ def ensure_tag_type(client: Client, name: str, description: str) -> int:
     return res.data[0]["id"]
 
 # Get's tag Id for every tag. This insert/fetch tag id from DB. Bridge between Code and DB
-# Invoked Address : Muliple places to get the tag Id.
-def ensure_tag(
-    client: Client,
-    *,
-    tag_type_id: int,
-    value: str,
-    label_en: str,
-    label_hi: str | None = None,
-    label_hinglish: str | None = None,
-    parent_id: str | None = None,
-) -> str:
+# Invoked Address : Muliple places to get the tag Id and insert new tags in DB
+def ensure_tag(client: Client, *, tag_type_id: int, value: str, label_en: str, label_hi: str | None = None, label_hinglish: str | None = None, parent_id: str | None = None,) -> str:
     """
     Canonical Tags insertion function in DB
     Upsert a tag and return its id.
@@ -801,10 +792,8 @@ def ensure_tag(
         "label_en": label_en,
         "label_hi": label_hi,
         "label_hinglish": label_hinglish,
+        "parent_id": parent_id if parent_id is not None else None,
     }
-    # Only include parent_id if your schema has it. Way to include more columns values in DB if its not null
-    if parent_id is not None:
-        payload["parent_id"] = parent_id
 
     res = client.table("tags").upsert(
         payload,

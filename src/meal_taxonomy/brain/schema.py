@@ -52,6 +52,7 @@ class RawMeal:
     instructions_text: str
 
     # Optional structured metadata for Meals
+    # To Do: More optional fields can be added as needed. This later are converted into Tags
     cuisine: Optional[str] = None
     course: Optional[str] = None
     diet: Optional[str] = None

@@ -78,8 +78,9 @@ class IndianMLModels:
         return self._joblib is not None
 
     # ------------------------------------------------------------------
-    # Public predictions
-    # ------------------------------------------------------------------
+    # Public predictions - Predictsion functions for various Tag attributes
+    # Invoked Address : Apply_ML and Enrich function from enrichment_pipeline.py
+    # Start ------------------------------------------------------------------
     def predict_course(self, text: str) -> Optional[MLLabel]:
         return self._predict_multiclass(self.course_clf, text)
 
@@ -148,12 +149,11 @@ class IndianMLModels:
 
         return []
 
-    # Invoked Address : Apply_ML and Enrich function from enrichment_pipeline.py
-    # Predicts the preparation and Cook time of the meal based on meal information
     def predict_prep_cook_time(self, text: str) -> MLTimes:
         prep = self._predict_regression(self.prep_reg, text)
         cook = self._predict_regression(self.cook_reg, text)
         return MLTimes(prep_time_mins=prep, cook_time_mins=cook)
+    # End ------------------------------------------------------------------------------
 
     # ------------------------------------------------------------------
     # Internal helpers

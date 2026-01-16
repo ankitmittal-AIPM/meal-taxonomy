@@ -113,6 +113,7 @@ class MealEnrichmentPipeline:
                 "resolution": "",
             },
         )
+        
         # ---------------- Cleaning & Normalization ----------------
         # Cleaning.py modules are invoked here
         # Clean's up the meal name
@@ -126,12 +127,14 @@ class MealEnrichmentPipeline:
         # ---------------- Tag candidates extraction ---------------- 
         # Accumulate TagCandidate objects (unified)
         candidates: List[TagCandidate] = []
-        # ---------------- Dataset meta -> tags ----------------
+        
+        # Dataset meta -> tags ----------------
         # Heuristic tags assignment from dataset-provided fields
-        candidates.extend(self._dataset_meta_candidates(raw))
-        # ---------------- NLP tags (existing RecipeNLP) ----------------
+        candidates.extend(self._retrieve_tags_dataset_meta_candidates(raw))
+        
+        # NLP tags (existing RecipeNLP) ----------------
         # Pulls out Tags from Instruction using NLP
-        candidates.extend(self._nlp_candidates(raw, canonical_name, instructions_norm))
+        candidates.extend(self._nlp_candidates(ingredients_norm, canonical_name, instructions_norm))
 
         # ---------------- Layer 0: deterministic signals ----------------
         region_path: List[str] = []
@@ -315,7 +318,7 @@ class MealEnrichmentPipeline:
     # Retrieve tags for meals that are extracted from Indian datasets
     # Invoked Address - from enrich function in enrichment pipeline.py.
     # ------------------------------------------------------------------
-    def _dataset_meta_candidates(self, raw: RawMeal) -> List[TagCandidate]:
+    def _retrieve_tags_dataset_meta_candidates(self, raw: RawMeal) -> List[TagCandidate]:
         """
         Convert any dataset-provided fields to TagCandidate if they align.
 
@@ -333,12 +336,12 @@ class MealEnrichmentPipeline:
         return tags
 
     # Invoked Address - from  enrich function in enrichment pipeline.py.
-    # This function pulls out Tags from Meal Instruction using NLP
-    def _nlp_candidates(self, raw: RawMeal, canonical_name: str, instructions: str) -> List[TagCandidate]:
+    # This function pulls out Tags from Meal Data >> Name + Ingredient + Instruction using NLP
+    def _nlp_candidates(self, ingredients: str, canonical_name: str, instructions: str) -> List[TagCandidate]:
         """Existing NLP tagger candidates (pattern-based)."""
-        txt = f"{canonical_name}\n{raw.ingredients_text}\n{instructions}"
+        txt = f"{canonical_name}\n{ingredients}\n{instructions}"
         # Calls up NLP_Tagging file
-        return self.nlp.tag_recipe_text(txt)
+        return self.nlp.nlp_tag_recipe_text(txt)
 
     def _ml_text(self, raw: RawMeal, canonical_name: str, ingredients: str, instructions: str) -> str:
         """Text fed to ML models."""

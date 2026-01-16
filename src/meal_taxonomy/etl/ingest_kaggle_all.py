@@ -127,8 +127,6 @@ def ingest_folder(folder: str = "data/kaggle") -> None:
             try:
                 # TO DO: If this calls ingest_recipe to upsert data at record level. 
                 # TO DO: Record level is too slow look for method to insert at batch level
-                # TO DO: Clear screen for better readability in CLI
-                os.system('cls' if os.name == 'nt' else 'clear')
                 logger.info(
                     "Ingesting recipe %d/%d from dataset '%s': '%s'",
                     idx + 1,
@@ -139,9 +137,6 @@ def ingest_folder(folder: str = "data/kaggle") -> None:
                  # Calls the ingest recipe function in pipeline.py to upsert data in Meal DBs in Supabase
                 etl.ingest_recipe(rec)
                 consecutive_failures = 0
-                # record_count += 1
-                # TO DO : Limiting testing of kaggle ingestion
-                # print(record_count,"|",rec.title,"|",rec.ingredients,"|",rec.source,"|",rec.description,"|",rec.instructions,"|",rec.meta)
                 # if record_count >= 5:
                 #     break            
             # Long code to silence consecutive errors logs in CLI
