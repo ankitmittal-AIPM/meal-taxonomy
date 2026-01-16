@@ -18,9 +18,16 @@ Output: Expected Output in CLI Run
     Remember to get above output the HTTP silence to be removed from Logging_utils.py
 """
 
+# To Do: Temporary fix for module imports
+import sys 
+from  pathlib import Path
+# To Do : Setting root directory for module imports
+# ROOT_DIR = Path(__file__).resolve().parents[3]
+# if str(ROOT_DIR) not in sys.path:
+#    sys.path.insert(2, str(ROOT_DIR))
+
 from typing import Dict
 from supabase import Client
-
 from src.meal_taxonomy.config import get_supabase_client
 from src.meal_taxonomy.logging_utils import get_logger
 
@@ -741,7 +748,14 @@ SEED_TAGS = [
 ]
 
 # -----------------------------------------------------------------------------
-# Helpers to upsert tag types and tags
+# Helpers to upsert tag types and tags. This insert/fetch tag_type id from DB. Bridge between Code and DB
+# Invoked Address : Multiple code files
+#   a. From seed_core_taxonomy within this file
+#   b. From ensure_category_tags in build_ingredient_category file
+#   c. From pipeline.py
+# Purpose: 
+#   a. This function insert all core category tag types in Tag_Type table in Supabase DB
+#   b. Add more category tag types based on ingredient search from Ontology
 # -----------------------------------------------------------------------------
 def ensure_tag_type(client: Client, name: str, description: str) -> int:
     """
@@ -762,7 +776,8 @@ def ensure_tag_type(client: Client, name: str, description: str) -> int:
     res = client.table("tag_types").select("id").eq("name", name).execute()
     return res.data[0]["id"]
 
-
+# Get's tag Id for every tag. This insert/fetch tag id from DB. Bridge between Code and DB
+# Invoked Address : Muliple places to get the tag Id.
 def ensure_tag(
     client: Client,
     *,
@@ -771,12 +786,15 @@ def ensure_tag(
     label_en: str,
     label_hi: str | None = None,
     label_hinglish: str | None = None,
+    parent_id: str | None = None,
 ) -> str:
     """
+    Canonical Tags insertion function in DB
     Upsert a tag and return its id.
     Compatible with supabase Python client v2.
     """
     value_norm = (value or "").strip().lower()
+    # Building Payload for upsert in Tag table of Supabase DB
     payload = {
         "tag_type_id": tag_type_id,
         "value": value_norm,
@@ -784,6 +802,9 @@ def ensure_tag(
         "label_hi": label_hi,
         "label_hinglish": label_hinglish,
     }
+    # Only include parent_id if your schema has it. Way to include more columns values in DB if its not null
+    if parent_id is not None:
+        payload["parent_id"] = parent_id
 
     res = client.table("tags").upsert(
         payload,
@@ -798,12 +819,12 @@ def ensure_tag(
         client.table("tags")
         .select("id")
         .eq("tag_type_id", tag_type_id)
-        .eq("value", value)
+        .eq("value", value_norm)
         .execute()
     )
     return res.data[0]["id"]
 
-
+# Invoked Address : Main function of this file
 def seed_core_taxonomy() -> None:
     """
     Seed all tag_types and initial tags for the meal taxonomy.
@@ -812,9 +833,12 @@ def seed_core_taxonomy() -> None:
     client = get_supabase_client()
 
     tag_type_ids: dict[str, int] = {}
+    
+    # Canonical Tag_Type: Insert basis core category tag types in Tag_Type above in this file in Tag_Type Table in Supabase DB
     for name, desc in TAG_TYPES.items():
         tag_type_ids[name] = ensure_tag_type(client, name, desc)
 
+    # Canonical Tags: Insert basis core category tag types in Tag_Type above in this file in Tag_Type Table in Supabase DB
     for tag in SEED_TAGS:
         tt_id = tag_type_ids[tag["tag_type"]]
         ensure_tag(
@@ -829,6 +853,7 @@ def seed_core_taxonomy() -> None:
 
 if __name__ == "__main__":
     seed_core_taxonomy()
+    # Sucessful seeded core taxonomy
     logger.info(
         "Core taxonomy seeded",
         extra={

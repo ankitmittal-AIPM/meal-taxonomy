@@ -148,6 +148,8 @@ class IndianMLModels:
 
         return []
 
+    # Invoked Address : Apply_ML and Enrich function from enrichment_pipeline.py
+    # Predicts the preparation and Cook time of the meal based on meal information
     def predict_prep_cook_time(self, text: str) -> MLTimes:
         prep = self._predict_regression(self.prep_reg, text)
         cook = self._predict_regression(self.cook_reg, text)
@@ -220,6 +222,8 @@ class IndianMLModels:
         except Exception:  # noqa: BLE001
             return None
 
+    # Invoked Address : Currently called from predicting preparation and cook time
+    # Regression ML pipeline
     def _predict_regression(self, model, text: str) -> Optional[float]:
         if model is None:
             return None

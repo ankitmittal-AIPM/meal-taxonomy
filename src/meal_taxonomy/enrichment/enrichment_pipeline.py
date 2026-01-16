@@ -94,7 +94,8 @@ class MealEnrichmentPipeline:
         self.llm = MealLLMEnricher() if self.config.enable_layer2_llm else None
 
     # ------------------------------------------------------------------
-    # Public API
+    # Public API - This can be exposed to any external function to enrich meal
+    # Invoked Address : ingest_recipe from Pipeline.py file.  
     # ------------------------------------------------------------------
     def enrich(self, raw: RawMeal) -> EnrichedMealVariant:
         """Main entry: RawMeal -> EnrichedMealVariant."""
@@ -112,18 +113,24 @@ class MealEnrichmentPipeline:
                 "resolution": "",
             },
         )
-
+        # ---------------- Cleaning & Normalization ----------------
+        # Cleaning.py modules are invoked here
+        # Clean's up the meal name
         canonical_name = clean_meal_name(raw.name) or raw.name
+        # Normalizes the ingredient names
         ingredients_norm = normalize_ingredients(raw.ingredients_text)
+        # Normalizes the instructions
         instructions_norm = normalize_instructions(raw.instructions_text)
+        #---------------- End: Cleaning & Normalization--------------
 
+        # ---------------- Tag candidates extraction ---------------- 
         # Accumulate TagCandidate objects (unified)
         candidates: List[TagCandidate] = []
-
         # ---------------- Dataset meta -> tags ----------------
+        # Heuristic tags assignment from dataset-provided fields
         candidates.extend(self._dataset_meta_candidates(raw))
-
         # ---------------- NLP tags (existing RecipeNLP) ----------------
+        # Pulls out Tags from Instruction using NLP
         candidates.extend(self._nlp_candidates(raw, canonical_name, instructions_norm))
 
         # ---------------- Layer 0: deterministic signals ----------------
@@ -149,6 +156,7 @@ class MealEnrichmentPipeline:
         ml_debug: Dict[str, object] = {}
 
         if self.config.enable_layer1_ml and self.ml_models and self.ml_models.enabled():
+            # Creating ML input text
             ml_text = self._ml_text(raw, canonical_name, ingredients_norm, instructions_norm)
             candidates, predicted_course, predicted_diet, spice_level, region_path, ml_debug = self._apply_ml(
                 candidates=candidates,
@@ -304,6 +312,8 @@ class MealEnrichmentPipeline:
 
     # ------------------------------------------------------------------
     # Internals
+    # Retrieve tags for meals that are extracted from Indian datasets
+    # Invoked Address - from enrich function in enrichment pipeline.py.
     # ------------------------------------------------------------------
     def _dataset_meta_candidates(self, raw: RawMeal) -> List[TagCandidate]:
         """
@@ -313,6 +323,7 @@ class MealEnrichmentPipeline:
           raw.course / raw.diet / raw.cuisine can seed tags with moderate confidence.
         """
         tags: List[TagCandidate] = []
+        # To Do: Expand this mapping as needed and change the confidence levels to more dynamic
         if raw.course:
             tags.append(TagCandidate(tag_type="course", value=str(raw.course), label_en=str(raw.course), confidence=0.60, is_primary=True, source="dataset"))
         if raw.diet:
@@ -321,14 +332,17 @@ class MealEnrichmentPipeline:
             tags.append(TagCandidate(tag_type="cuisine_region", value=str(raw.cuisine), label_en=str(raw.cuisine), confidence=0.55, is_primary=False, source="dataset"))
         return tags
 
+    # Invoked Address - from  enrich function in enrichment pipeline.py.
+    # This function pulls out Tags from Meal Instruction using NLP
     def _nlp_candidates(self, raw: RawMeal, canonical_name: str, instructions: str) -> List[TagCandidate]:
         """Existing NLP tagger candidates (pattern-based)."""
         txt = f"{canonical_name}\n{raw.ingredients_text}\n{instructions}"
+        # Calls up NLP_Tagging file
         return self.nlp.tag_recipe_text(txt)
 
     def _ml_text(self, raw: RawMeal, canonical_name: str, ingredients: str, instructions: str) -> str:
         """Text fed to ML models."""
-        # Keep it consistent with training script: title + ingredients + instructions + coarse fields
+        # Keep it consistent with ML training script: title + ingredients + instructions + coarse fields
         coarse = f"{raw.cuisine or ''} {raw.course or ''} {raw.diet or ''}"
         return f"{canonical_name}\n{ingredients}\n{instructions}\n{coarse}".strip()
 

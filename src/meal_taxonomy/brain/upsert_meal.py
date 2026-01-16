@@ -117,10 +117,10 @@ def _serialize_tag_candidates(tag_candidates: Any) -> List[Dict[str, Any]]:
 # If you later add embeddings, you can keep the same thresholds and adjust
 # weighting in _score_candidate().
 # Thresholds – tune empirically
-T_SAME = 0.80       # confidently same canonical dish
-T_MAYBE = 0.65      # plausible match; attach variant but mark needs_review
+T_SAME = 0.85       # confidently same canonical dish
+T_MAYBE = 0.70      # plausible match; attach variant but mark needs_review
 
-
+# Invoked Address: Main entry --> Upsert a canonical meal + variant given an enriched meal variant
 def upsert_meal(
     enriched: EnrichedMealVariant,
     client: Optional[Client] = None,
@@ -204,6 +204,7 @@ def upsert_meal(
 
 # ----------------------------------------------------------------------
 # Existing variant lookup
+# Purpose: Check if a meal_variant row already exists for this source_type+source_id to ensure idempotency.
 # ----------------------------------------------------------------------
 def _get_existing_variant(enriched: EnrichedMealVariant, client: Client) -> Optional[Dict[str, Any]]:
     """Return existing meal_variants row for this source if present."""
@@ -233,9 +234,9 @@ def _get_existing_variant(enriched: EnrichedMealVariant, client: Client) -> Opti
         )
         return None
 
-
 # ----------------------------------------------------------------------
 # Candidate lookup & scoring
+# Purpose: Find candidate canonical meals using fast DB-side search (RPC or ILIKE). Gives best 20 results that has ben set as value of "k"
 # ----------------------------------------------------------------------
 def _find_candidate_meals(
     enriched: EnrichedMealVariant,
@@ -255,18 +256,21 @@ def _find_candidate_meals(
       list of dicts with at least {id, title, title_normalized}
     """
     query = normalize_title(enriched.canonical_name or enriched.raw.name)
+    diet_value = _normalize(enriched.predicted_diet or enriched.raw.diet) if _normalize(enriched.predicted_diet or enriched.raw.diet) else None
+    meal_type_value = _normalize(enriched.predicted_course or enriched.raw.course) if _normalize(enriched.predicted_course or enriched.raw.course) else None
+    region_value = _normalize(", ".join(enriched.region_tags or [])) if enriched.region_tags else None
 
-    # Try RPC first (fast DB-side search)
+    # Method 1 - Try RPC first (fast DB-side search)
     try:
         resp = client.rpc(
             "search_meals_v2",
             {
                 "query_text": query,
-                "limit": k,
-                # Keep these optional filters unset for candidate retrieval.
-                "diet_value": None,
-                "meal_type_value": None,
-                "region_value": None,
+                "limit_n": k,
+                # To Do: Keep these optional filters unset for candidate retrieval.
+                "diet_value": diet_value,
+                "meal_type_value": meal_type_value,
+                "region_value": region_value,
             },
         ).execute()
         rows = resp.data or []
@@ -279,6 +283,7 @@ def _find_candidate_meals(
                     "id": r.get("id"),
                     "title": r.get("title"),
                     "title_normalized": r.get("title_normalized") or normalize_title(r.get("title") or ""),
+                    "score": r.get("score", 0.0),
                 }
             )
         return [c for c in candidates if c.get("id")]
@@ -295,7 +300,7 @@ def _find_candidate_meals(
             },
         )
 
-    # Fallback: ILIKE on title_normalized / title
+    # Method 2 - Fallback: ILIKE on title_normalized / title
     # Use the first token to keep the query selective.
     tokens = query.split()
     token = tokens[0] if tokens else query
@@ -328,32 +333,47 @@ def _find_candidate_meals(
         )
         return []
 
-
+# Find the candidate that is most similar to enriched meal
 def _pick_best_candidate(
     enriched: EnrichedMealVariant,
     candidates: List[Dict[str, Any]],
 ) -> Tuple[Optional[Dict[str, Any]], float]:
+    cands = list(candidates)
+    if not cands:
+        return None, 0.0
+    
+    rpc_scores = [float(c.get("score") or 0.0) for c in cands]
+    min_rpc_score = min(rpc_scores)
+    max_rpc_score = max(rpc_scores)
+
     best: Optional[Dict[str, Any]] = None
     best_score = -1.0
     for cand in candidates:
-        score = _score_candidate(enriched, cand)
+        score = _score_candidate(enriched, cand, min_rpc_score=min_rpc_score, max_rpc_score=max_rpc_score)
         if score > best_score:
             best_score = score
             best = cand
     return best, float(best_score)
 
+# To Do: Later, you can mix in embedding similarity, ingredient overlap, tag overlap, etc.
+# Purpose: Compute explainable similarity score between enriched meal and candidate meal.
+# Invoked Address: Called from _pick_best_candidate function to compute similarity score between enriched meal and candidate meal.
+def _score_candidate(enriched: EnrichedMealVariant, cand: Dict[str, Any], *, min_rpc_score: float, max_rpc_score: float) -> float:
+    """
+    Food-aware similarity score using ONLY:
+      - title / title_normalized (via normalize_title)
+      - rpc score from DB
 
-def _score_candidate(enriched: EnrichedMealVariant, cand: Dict[str, Any]) -> float:
-    """Explainable similarity score (name-based).
-
-    score in [0, 1].
+    Returns score in [0, 1] (approximately; penalties clamp it down).
     """
     q = normalize_title(enriched.canonical_name or enriched.raw.name)
     c = normalize_title(cand.get("title_normalized") or cand.get("title") or "")
 
+    # Handle case where both title in query and candidate are empty
     if not q or not c:
         return 0.0
 
+    #------Score A - Original name similarity Score (robust to typos / word order)------
     # Token Jaccard (robust to word order)
     q_tokens = set(q.split())
     c_tokens = set(c.split())
@@ -363,9 +383,23 @@ def _score_candidate(enriched: EnrichedMealVariant, cand: Dict[str, Any]) -> flo
 
     # Sequence ratio (captures near-spellings)
     seq = difflib.SequenceMatcher(a=q, b=c).ratio()
+    name_score = float(0.55 * jacc + 0.45 * seq)
 
-    # Weighted blend (simple; tune later)
-    return float(0.55 * jacc + 0.45 * seq)
+    #-----Score B - RPC Score normalized per candidate set----
+    cand_rpc = float(cand.get("score") or 0.0)
+    # Per-query normalization across returned candidates.
+    denom = (max_rpc_score - min_rpc_score)
+    if denom <= 1e-9:
+        return 0.0
+    x = (cand_rpc - min_rpc_score) / denom
+    # Clamp defensively.
+    rpc_norm =  float(max(0.0, min(1.0, x)))
+
+    # Final blend (tune later)
+    final = 0.55 * name_score + 0.45 * rpc_norm
+
+    # To Do: Recheck the score computation Weighted blend (simple; tune later)
+    return float(max(0.0, min(1.0, final)))
 
 
 # ----------------------------------------------------------------------
@@ -376,17 +410,20 @@ def _insert_new_canonical(enriched: EnrichedMealVariant, client: Client) -> str:
     canonical_title = enriched.canonical_name or enriched.raw.name
     payload: Dict[str, Any] = {
         "title": canonical_title,
-        "title_normalized": normalize_title(canonical_title),
+        # "title_normalized": normalize_title(canonical_title),
         "description": enriched.raw.description,
         "instructions": enriched.instructions_norm or enriched.raw.instructions_text,
         # Keep existing schema expectations: 'source' and external_* fields.
-        "source": "canonical",
-        "external_source": "canonical",
-        "external_id": str(uuid.uuid4()),
+        #"source": "canonical",
+        "source": "dataset",
+        # "external_source": "canonical",
+        "external_source": enriched.raw.source_type,
+        # "external_id": str(uuid.uuid4()),
+        "external_id": enriched.raw.source_id,
         "language_code": "en",
         "cook_time_minutes": int(enriched.cook_time_mins) if enriched.cook_time_mins is not None else None,
         "prep_time_minutes": int(enriched.prep_time_mins) if enriched.prep_time_mins is not None else None,
-        "total_time_minutes": int(enriched.total_time_mins) if enriched.total_time_mins is not None else None,
+        # "total_time_minutes": int(enriched.total_time_mins) if enriched.total_time_mins is not None else None,
         "servings": enriched.servings,
         "meta": {
             # Minimal canonical metadata (safe for ontology scripts that read meals.meta)
@@ -457,7 +494,7 @@ def _upsert_variant(
         "source_type": enriched.raw.source_type,
         "source_id": enriched.raw.source_id,
         "title_original": enriched.raw.name,
-        "title_normalized": normalize_title(enriched.raw.name),
+        # "title_normalized": normalize_title(enriched.raw.name),
         "ingredients_raw": enriched.raw.ingredients_text,
         "ingredients_norm": enriched.ingredients_norm,
         "instructions_raw": enriched.raw.instructions_text,
@@ -467,7 +504,7 @@ def _upsert_variant(
         "diet": enriched.predicted_diet or enriched.raw.diet,
         "prep_time_minutes": enriched.prep_time_mins,
         "cook_time_minutes": enriched.cook_time_mins,
-        "total_time_minutes": enriched.total_time_mins,
+        #"total_time_minutes": enriched.total_time_mins,
         "servings": enriched.servings,
         "needs_review": needs_review,
         "meta": {
@@ -507,6 +544,7 @@ def _upsert_variant(
         )
         return ""
 
+# To Do: Where to call this
 def _maybe_update_canonical(
     canonical_meal_id: str,
     enriched: EnrichedMealVariant,
@@ -524,6 +562,7 @@ def _maybe_update_canonical(
     _ = canonical_meal_id, enriched, client
     return
 
+# Purpose: Attach tags to canonical meal using existing taxonomy seed helpers.
 def _attach_tags(
     canonical_meal_id: str,
     enriched: EnrichedMealVariant,
@@ -532,6 +571,8 @@ def _attach_tags(
     """
     Attach tags to the canonical meal using existing taxonomy seed helpers.
     """
+
+    tag_type_Ids: Dict[str, str] = {}
     # Ensure tag types exist
     for tag_type in [
         "diet",
@@ -550,7 +591,8 @@ def _attach_tags(
         "kids_friendly",
     ]:
         try:
-            ensure_tag_type(client, tag_type, f"Auto-created tag_type: {tag_type}")
+            temp_tag_type_id = ensure_tag_type(client, tag_type, f"Auto-created tag_type: {tag_type}")
+            tag_type_Ids[tag_type] = temp_tag_type_id
         except Exception:
             pass
 
@@ -558,31 +600,38 @@ def _attach_tags(
     # NOTE: actual linking into meal_tags is done elsewhere in your pipeline.
     # Here we just ensure tags exist.
     if enriched.predicted_diet:
-        ensure_tag(client, "diet", enriched.predicted_diet, enriched.predicted_diet.replace("_", " ").title())
+        tag_type_id = tag_type_Ids.get("diet")
+        ensure_tag(client, tag_type_id=tag_type_id, value=enriched.predicted_diet, label_en=enriched.predicted_diet.replace("_", " ").title())
 
     if enriched.predicted_course:
-        ensure_tag(client, "course", enriched.predicted_course, str(enriched.predicted_course).title())
-
+        tag_type_id = tag_type_Ids.get("course")
+        ensure_tag(client, tag_type_id=tag_type_id, value=enriched.predicted_course, label_en=str(enriched.predicted_course).title())
     for r in (enriched.region_tags or []):
-        ensure_tag(client, "cuisine_region", r, r)
+        tag_type_id = tag_type_Ids.get("cuisine_region")
+        ensure_tag(client, tag_type_id=tag_type_id, value=r, label_en=r)
 
     if enriched.spice_level is not None:
-        ensure_tag(client, "spice_level", str(enriched.spice_level), f"Spice {enriched.spice_level}")
+        tag_type_id = tag_type_Ids.get("spice_level")
+        ensure_tag(client, tag_type_id=tag_type_id, value=str(enriched.spice_level), label_en=f"Spice {enriched.spice_level}")
 
     if enriched.kids_friendly is not None:
-        ensure_tag(client, "kids_friendly", "kids_friendly" if enriched.kids_friendly else "not_kids_friendly",
-                   "Kids-friendly" if enriched.kids_friendly else "Not kids-friendly")
-
+        tag_type_id = tag_type_Ids.get("kids_friendly")
+        ensure_tag(client, tag_type_id=tag_type_id, value="kids_friendly" if enriched.kids_friendly else "not_kids_friendly",
+                   label_en="Kids-friendly" if enriched.kids_friendly else "Not kids-friendly")
+    
     for h in (enriched.health_tags or []):
-        ensure_tag(client, "health", h, h.replace("_", " ").title())
-
+        tag_type_id = tag_type_Ids.get("health")
+        ensure_tag(client, tag_type_id=tag_type_id, value=h, label_en=h.replace("_", " ").title())
+    
     for o in (enriched.occasion_tags or []):
-        ensure_tag(client, "occasion", o, o.replace("_", " ").title())
+        tag_type_id = tag_type_Ids.get("occasion")
+        ensure_tag(client, tag_type_id=tag_type_id, value=o, label_en=o.replace("_", " ").title())
 
     for u in (enriched.utensil_tags or []):
-        ensure_tag(client, "equipment", u, u.replace("_", " ").title())
+        tag_type_id = tag_type_Ids.get("equipment")
+        ensure_tag(client, tag_type_id=tag_type_id, value=u, label_en=u.replace("_", " ").title())
 
-
+# To Do: Where to call this
 def _refresh_search_doc(meal_id: str, client: Client) -> None:
     """Call refresh_meal_search_doc(uuid) if present."""
     try:
@@ -596,6 +645,8 @@ def _normalize(s: str) -> str:
 
 # ----------------------------------------------------------------------
 # Synonyms (optional)
+# Purpose: Upsert alt names into meal_synonyms table (if present). 
+# Alt names are stored in enriched.alt_names which gets data majorly from LLM enrichment.
 # ----------------------------------------------------------------------
 def _attach_synonyms(meal_id: str, enriched: EnrichedMealVariant, client: Client) -> None:
     """Upsert alt names into meal_synonyms table (optional)."""

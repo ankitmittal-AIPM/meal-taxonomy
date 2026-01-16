@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 
 
 @dataclass
+# Set the Class definition of the Rawmeal that should be their with any meal.
 class RawMeal:
     """Unified input payload for a meal (dataset row, user form, chat parse, etc.)."""
 
@@ -44,13 +45,13 @@ class RawMeal:
     source_type: str               # e.g. "Kaggle:indian_food" or "user_form"
     source_id: str                 # dataset-specific key / external id
 
-    # Core text fields
-    name: str
+    # Core text fields for Meals
+    name: str       # Usually set as title of the meal
     description: Optional[str]
     ingredients_text: str
     instructions_text: str
 
-    # Optional structured metadata
+    # Optional structured metadata for Meals
     cuisine: Optional[str] = None
     course: Optional[str] = None
     diet: Optional[str] = None

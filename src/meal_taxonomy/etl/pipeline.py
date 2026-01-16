@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 pipeline.py
 
@@ -21,8 +22,6 @@ Tag flow:
     4) create tags/tag_types if missing
     5) insert into meal_tags for each meal
 """
-
-from __future__ import annotations
 
 import re
 import time
@@ -77,7 +76,6 @@ from src.meal_taxonomy.taxonomy.taxonomy_seed import TAG_TYPES, ensure_tag, ensu
 # Fallback lookup for upsert in Meal DB
 
 logger = get_logger(__name__)
-
 
 def merge_tag_candidates(candidates: List[TagCandidate]) -> List[TagCandidate]:
     """
@@ -262,7 +260,7 @@ class MealETL:
         res2 = (
             self.client.table("ingredients")
             .select("id")
-            .ilike("name_en", name)
+            .ilike("name_en", name) # Removed wild card i.e.  f"%{name}%" for name in like clause
             .limit(1)
             .execute()
         )
@@ -271,11 +269,14 @@ class MealETL:
             self.ingredient_cache[cache_key] = ing_id
             return ing_id
 
+        # Building payload to insert in Ingredient Table of Supabase
+        # To Do : Language to be made dyanmic See this link for fix - https://chatgpt.com/s/t_694ccc90cdb4819183785faffc3cd36c
         payload = {
             "name_en": name,
-            "name_normalized": normalize_title(name),
-            "language_code": language_code,
-            "meta": {},
+            "metadata": {
+                "name_normalized": normalize_title(name),
+                "language_code": language_code,   # keep as metadata if you still want it
+            },
         }
         inserted = self.client.table("ingredients").insert(payload).execute()
         ing_id = inserted.data[0]["id"]
@@ -288,6 +289,7 @@ class MealETL:
     def attach_ingredients(self, meal_id: str, ingredients_text: str) -> None:
         lines = split_ingredient_lines(ingredients_text or "")
         rows: List[dict] = []
+        # Get ingredient id from Ingredient table in supabase. Get means "fetch if there or create one in the table"
         for raw_line in lines:
             ing_id = self.get_or_create_ingredient(raw_line)
             if not ing_id:
@@ -341,6 +343,9 @@ class MealETL:
 
     # -----------------------------------------------------
     # End-to-end ingest
+    # Invoked Address : ingest_records within this file, once records are read from csv/external files on meals
+    # Converts each record in datatable of recipe record to Rawmeal
+    # 
     # -----------------------------------------------------
     def ingest_recipe(self, record: RecipeRecord, *, refresh_search: bool = True) -> dict:
         """
@@ -359,6 +364,8 @@ class MealETL:
         if record.prep_time_minutes is not None or record.cook_time_minutes is not None:
             total_time = (record.prep_time_minutes or 0) + (record.cook_time_minutes or 0)
 
+        # Convert RecipeRecord taken from external data source to RawMeal
+        # Create RawMeal from the record i.e. data retrived from CSV file
         raw = RawMeal(
             source_type=record.source,
             source_id=record.external_id,
@@ -376,6 +383,7 @@ class MealETL:
             extra=dict(record.meta or {}),
         )
 
+        # Enrich RawMeal and include more details to the meal
         enriched = self.enricher.enrich(raw)
 
         # Upsert canonical + variant
@@ -400,11 +408,16 @@ class MealETL:
         )
 
         return {"meal_id": meal_id, "variant_id": variant_id, "status": status}
-
+    
+    # -----------------------------------------------------
+    # Invoked Address : ingest_indian_kaggle within this code file pipeline.py
+    # Invokes ingestion of complete Record recipe in DB. This calls the row wise ingestion in loop
+    # -----------------------------------------------------
     def ingest_records(self, records: Iterable[RecipeRecord], *, refresh_search: bool = True) -> None:
         for idx, rec in enumerate(records, start=1):
             t0 = time.time()
             try:
+                # 
                 self.ingest_recipe(rec, refresh_search=refresh_search)
             except Exception as e:  # pragma: no cover
                 logger.exception(
@@ -415,6 +428,7 @@ class MealETL:
                 logger.info("ingest_progress", extra={"idx": idx, "elapsed_s": round(time.time() - t0, 3)})
 
 
+# Invoked Address : From etl_run.py script to load the indian dataset
 def ingest_indian_kaggle(
     csv_path: str,
     *,
@@ -427,9 +441,12 @@ def ingest_indian_kaggle(
     Convenience wrapper used by scripts/etl_run.py.
     """
     client = get_supabase_client()
+    # To Do: Check for Hugging Face Warning here in MealETL class object initialization
     etl = MealETL(client, use_llm=use_llm, use_embeddings=use_embeddings, use_ml=use_ml)
-
+    # Build data table of records to be ingested in Meals Table of Supabase DB
+    # initiates the ETL object of the Meal and loads data from CSV file. CSV --> DT --> Data Cleaning in DT --> Creating Recipe Record Object --> Assign it to ETL
     records = load_indian_kaggle_csv(csv_path, limit=limit)
+    # Invokes ingestion of complete Record recipe in DB
     etl.ingest_records(records)
 
 

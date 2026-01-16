@@ -719,6 +719,7 @@ class RecipeNLP:
     # Purpose:
     #   Some callsites have only a single free-text blob (title + ingredients + instructions combined).
     #   This helper keeps those callsites working without forcing them to pre-split ingredients.
+    # Invoked Address: From _nlp_candidates in Enrichment_Pipeline file
     # ------------------------------------------------------------------
     def tag_recipe_text(self, text: str) -> List[TagCandidate]:
         """

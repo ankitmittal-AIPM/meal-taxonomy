@@ -52,7 +52,7 @@ In Supabase SQL editor (or `supabase db push` if you use the CLI), apply:
 
 > `migrations/` is the source of truth for the schema.
 
-### 4) Seed taxonomy tag types
+### 4) Seed taxonomy tag types & ontology
 
 ```bash
 python scripts/seed_taxonomy.py

@@ -169,7 +169,8 @@ def infer_region_path(title: str, ingredients: str = "", instructions: str = "")
             return [p.strip() for p in path.split("|") if p.strip()]
     return []
 
-
+# Append new tag i.e. region tags based on region path
+# Invoked Address : layer0_candidates in enrichment_pipeline.py
 def region_tags_as_candidates(region_path: Sequence[str]) -> List[TagCandidate]:
     tags: List[TagCandidate] = []
     for i, node in enumerate(region_path):

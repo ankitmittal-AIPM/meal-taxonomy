@@ -18,6 +18,123 @@
                 "--namespace",
                 "http://purl.obolibrary.org/obo/FOODON_"
             ]  
-        }
+        },
+        {
+            "name": "ETL - Indian (Internal)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/etl_run.py",
+            "args": ["--indian"],
+            "console": "internalConsole",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": false
+        },
+        {
+            "name": "ETL - Indian (limit 100)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/etl_run.py",
+            "args": ["--indian", "--limit", "100"],
+            "console": "internalConsole",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": false
+        },
+        {
+            "name": "ETL - FoodOn (Internal)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/etl_run.py",
+            "args": ["--foodon"],
+            "console": "internalConsole",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": false
+        },
+        {
+            "name": "ETL - FoodOn (limit 100)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/etl_run.py",
+            "args": ["--foodon", "--limit", "100"],
+            "console": "internalConsole",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": false
+        },
+        {
+            "name": "ETL - Category Tagging",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/etl_run.py",
+            "args": ["--category"],
+            "console": "internalConsole",
+            "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "name": "ETL - Category Tagging (limit 100)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/etl_run.py",
+            "args": ["--category",  "--limit", "100"],
+            "console": "internalConsole",
+            "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "name": "ETL - Kaggle Dataset",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/etl_run.py",
+            "args": ["--kaggle"],
+            "console": "internalConsole",
+            "envFile": "${workspaceFolder}/.env",
+            //If set to true it will only run the file and won't allow jump to other code
+            "justMyCode": false
+        },
+        {
+            "name": "ETL - Kaggle Dataset (limit 100)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/etl_run.py",
+            "args": ["--kaggle",  "--limit", "100"],
+            "console": "internalConsole",
+            "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "name": "ETL - Bootstrap (FoodOn → Category → Indian)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/etl_run.py",
+            "args": ["--pipeline", "bootstrap"],
+            "console": "internalConsole",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": false
+        },
+        {
+            "name": "Train - ML Model",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/train_enrichment_models.py",
+            "args": ["--pipeline", "bootstrap"],
+            "console": "internalConsole",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": false
+        },
+        {
+            "name": "Taxonomy Seed",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/meal_taxonomy/taxonomy/taxonomy_seed.py",
+            //"args": ["--pipeline", "bootstrap"],
+            "console": "internalConsole",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": false
+        },
+        {
+            "name": "SSL Test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/test_ssl.py",
+            "console": "internalConsole",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": false
+        },
     ]
 }

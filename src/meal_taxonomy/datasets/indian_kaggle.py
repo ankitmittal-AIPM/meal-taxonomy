@@ -5,12 +5,15 @@
 # datasets/indian_kaggle.py
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 import pandas as pd
 import csv
 
 from .base import RecipeRecord
 
+# Reads CSV data and insert into datatable
+# This reads the data as it is from the csv file and just add each cell value in double quotes in Data table
+# No major activity - Cleans up the records and add all records from CSV file as it is in double quotes
 def _load_csv_robust(path: str) -> pd.DataFrame:
     """
     Load your specific CSV format:
@@ -72,20 +75,27 @@ def _load_csv_robust(path: str) -> pd.DataFrame:
     df = pd.DataFrame(rows, columns=header)
     return df
 
-def load_indian_kaggle_csv(path: str) -> List[RecipeRecord]:
+# Invoked Address : ingest_indian_kaggle from pipeline.py
+# This normalizes the columns from the data and set the data table records in predefined
+# To Do: Enhance the range for each columns in column normalization
+def load_indian_kaggle_csv(path: str, limit: Optional[int] = None,) -> List[RecipeRecord]:
+    # Load data from CSV file as each cell in double quotes
     df = _load_csv_robust(path)
 
+    #--Start Cleaning & Normalizing Columns ingested from CSV file----------------------------------------------------------------------------------
     # Normalize column names to lowercase, stripped
     df.columns = [c.strip().lower() for c in df.columns]
 
-    # Detect the ingredients column
+    # Matching Column search and mapping. It's heuristic rule based not ML or LLM based
+    # Ingredient Column Search ---
+    # Detect the ingredients column from the data file
     possible_ingredient_cols = ["ingredients", "ingredient", "ingredient_list", "ingr"]
     ingredient_col = None
     for col in possible_ingredient_cols:
         if col in df.columns:
             ingredient_col = col
             break
-
+    # Raise warning on matching ingredient column not found
     if ingredient_col is None:
         raise ValueError(
             f"Could not find an ingredients column. Available columns: {list(df.columns)}. "
@@ -93,19 +103,21 @@ def load_indian_kaggle_csv(path: str) -> List[RecipeRecord]:
             f"{possible_ingredient_cols}"
         )
 
+    # Meal Title Column Search ---
     # Title column
     title_col = None
     for candidate in ["name", "recipe_name", "title"]:
         if candidate in df.columns:
             title_col = candidate
             break
-
+    # Raise warning on matching Title column not found
     if title_col is None:
         raise ValueError(
             f"Could not find a title column. Available columns: {list(df.columns)}. "
             "Please rename your recipe title column to one of: ['name', 'recipe_name', 'title']"
         )
 
+    # Region Column Search ---
     # Optional columns
     region_col = next((c for c in ["region", "cuisine_region"] if c in df.columns), None)
     course_col = next((c for c in ["course", "meal_type"] if c in df.columns), None)
@@ -116,8 +128,9 @@ def load_indian_kaggle_csv(path: str) -> List[RecipeRecord]:
     instructions_col = next((c for c in ["instructions", "steps", "directions", "method"] if c in df.columns), None)
     id_col = next((c for c in ["id", "recipe_id"] if c in df.columns), None)
 
+    #--End Cleaning & Normalizing Columns ingested from CSV file----------------------------------------------------------------------------------
     records: list[RecipeRecord] = []
-
+    # Reading rows from dataset and constructing records to ingest in DB
     for _, row in df.iterrows():
         # Ingredients list
         raw_ing = str(row[ingredient_col])
@@ -157,7 +170,6 @@ def load_indian_kaggle_csv(path: str) -> List[RecipeRecord]:
             prep_time_minutes=prep_time,
         )
         records.append(rec)
-
     return records
 
 

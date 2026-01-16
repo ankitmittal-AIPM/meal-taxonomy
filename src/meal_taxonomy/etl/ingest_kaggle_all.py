@@ -125,19 +125,28 @@ def ingest_folder(folder: str = "data/kaggle") -> None:
         # Invokes pipeline.py function ingest_recipe to upsert data in Meal DBs in Supabase
         for idx, rec in enumerate(recipes):
             try:
-                # TO DO: If this calls ingest_recipe to upsert data at record level or batch level. 
+                # TO DO: If this calls ingest_recipe to upsert data at record level. 
                 # TO DO: Record level is too slow look for method to insert at batch level
-                etl.ingest_recipe(r)
+                # TO DO: Clear screen for better readability in CLI
+                os.system('cls' if os.name == 'nt' else 'clear')
+                logger.info(
+                    "Ingesting recipe %d/%d from dataset '%s': '%s'",
+                    idx + 1,
+                    len(recipes),
+                    dataset_name,
+                    rec.title,
+                )
+                 # Calls the ingest recipe function in pipeline.py to upsert data in Meal DBs in Supabase
+                etl.ingest_recipe(rec)
                 consecutive_failures = 0
-                record_count += 1
+                # record_count += 1
                 # TO DO : Limiting testing of kaggle ingestion
-                print(record_count,"|",rec.title,"|",rec.ingredients,"|",rec.source,"|",rec.description,"|",rec.instructions,"|",rec.meta)
-                if record_count >= 5:
-                     break            
+                # print(record_count,"|",rec.title,"|",rec.ingredients,"|",rec.source,"|",rec.description,"|",rec.instructions,"|",rec.meta)
+                # if record_count >= 5:
+                #     break            
             # Long code to silence consecutive errors logs in CLI
             except Exception as exc:  # noqa: BLE001
                 consecutive_failures += 1
-
                 extra = {
                     "invoking_func": "ingest_folder",
                     "invoking_purpose": "Batch ingest all Kaggle CSV files in a folder",

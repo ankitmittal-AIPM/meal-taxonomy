@@ -12,7 +12,8 @@ Because pipeline.dataset_tags() already expects these meta keys, it will:
 1. Create tags under existing tag types like diet, cuisine_region, meal_type, taste_profile.
 2. Not create any new tag_type names, so no duplicates there.
 """
-from typing import Dict, List, Optional
+import re
+from typing import Dict, List, Optional, Set, Iterable
 import os
 
 import pandas as pd
@@ -46,6 +47,10 @@ TITLE_COLS = {
     "title",
     "dish_name",
 }
+TITLE_COL_REGEX = {
+    r"(?i)^(?=.*recipe)(?=.*name).*"
+}
+
 INGREDIENTS_COLS = {
     "ingredients",
     "ingredient_list",
@@ -61,6 +66,10 @@ INSTRUCTIONS_COLS = {
     "procedure",
     "cooking_directions",
 }
+INSTRUCTIONS_COL_REGEX = {
+    r"(?i)^(?=.*instructions).*"
+}
+
 CUISINE_COLS = {
     "cuisine",
     "region",
@@ -113,17 +122,31 @@ TOTAL_TIME_COLS = {
     "ready_in_min",
     "ready_in_mins",
 }
-
+TOTAL_TIME_COL_REGEX = {
+     r"(?i)^(?=.*total)(?=.*time).*"
+}
 # Invoke Address : Called from ingest_kaggle_all.py code
 # Find relevant nomarlized column name for any un-normalized original column in dataset
-def _find_col(norm_to_orig: Dict[str, str], candidates: set[str]) -> Optional[str]:
+def _find_col(norm_to_orig: Dict[str, str], candidates: Set[str], regex_candidates: Optional[Iterable[str]] = None,) -> Optional[str]:
     """
     Given a mapping of normalized -> original column names, return the original
     name for the first candidate that exists.
+    Optionally supports regex-based column matching.
     """
+
+    # 1. Exact match (fast path)
     for cand in candidates:
         if cand in norm_to_orig:
             return norm_to_orig[cand]
+
+    # 2. Regex match (optional)
+    if regex_candidates:
+        for pattern in regex_candidates:
+            regex = re.compile(pattern)
+            for norm_col, orig_col in norm_to_orig.items():
+                if regex.search(norm_col):
+                    return orig_col
+
     return None
 
 # Invoke Address : Called from load_kaggle_csv code
@@ -193,16 +216,16 @@ def load_kaggle_csv(path: str, dataset_name: Optional[str] = None) -> List[Recip
         norm = _normalize_col_name(orig)
         norm_to_orig[norm] = orig
     
-    title_col = _find_col(norm_to_orig, TITLE_COLS)     # Search for similar list of titles as in Title_Cols and assign that name
+    title_col = _find_col(norm_to_orig, TITLE_COLS, TITLE_COL_REGEX)     # Search for similar list of titles as in Title_Cols and assign that name
     ingredients_col = _find_col(norm_to_orig, INGREDIENTS_COLS)
-    instructions_col = _find_col(norm_to_orig, INSTRUCTIONS_COLS)
+    instructions_col = _find_col(norm_to_orig, INSTRUCTIONS_COLS, INSTRUCTIONS_COL_REGEX)
     cuisine_col = _find_col(norm_to_orig, CUISINE_COLS)
     course_col = _find_col(norm_to_orig, COURSE_COLS)
     diet_col = _find_col(norm_to_orig, DIET_COLS)
     flavor_col = _find_col(norm_to_orig, FLAVOR_COLS)
     prep_col = _find_col(norm_to_orig, PREP_TIME_COLS)
     cook_col = _find_col(norm_to_orig, COOK_TIME_COLS)
-    total_col = _find_col(norm_to_orig, TOTAL_TIME_COLS)
+    total_col = _find_col(norm_to_orig, TOTAL_TIME_COLS, TOTAL_TIME_COL_REGEX)
 
     # Intializes Empty RecipeRecord to be inserted in Meal DB using Pipeline.MealETL
     records: List[RecipeRecord] = []
@@ -272,5 +295,4 @@ def load_kaggle_csv(path: str, dataset_name: Optional[str] = None) -> List[Recip
             prep_time_minutes=prep_time,
         )
         records.append(rec)
-
     return records

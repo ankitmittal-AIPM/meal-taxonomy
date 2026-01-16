@@ -14,7 +14,7 @@ Purpose:
 import re
 from typing import Optional
 
-
+# To Do: Prepare complete library of common replacment/alternative for meal names
 _COMMON_REPLACEMENTS = [
     (r"\brecipe\b", ""),
     (r"\bidly\b", "idli"),
@@ -23,13 +23,17 @@ _COMMON_REPLACEMENTS = [
     (r"\bchilli powder\b", "red chilli powder"),
 ]
 
+# Invoked Address - from enrich function in enrichment pipeline.py. Also from normalize_title within same code file cleaning.py
+# Cleans up the title of the meal
 def clean_meal_name(name: Optional[str]) -> Optional[str]:
+    # returns null if name is not instance of string class
     if not isinstance(name, str):
         return None
     t = name.strip()
     if not t:
         return None
-    # Remove common junk
+    
+    # Remove common junk from the title such as
     t = re.sub(r"\b(recipe|authentic|best|easy|quick)\b", "", t, flags=re.I)
     t = re.sub(r"\s+", " ", t).strip()
     
@@ -45,13 +49,14 @@ def clean_meal_name(name: Optional[str]) -> Optional[str]:
     # Remove hyphens/dashes at start or end
     t = t.strip(" -\u2013\u2014")
 
-    # Apply common replacements
+    # Apply common replacements for certain words in the meal names
     for pat, rep in _COMMON_REPLACEMENTS:
         t = re.sub(pat, rep, t, flags=re.IGNORECASE)
     
     return t
 
-
+# Invoked Address - from enrich function in enrichment pipeline.py.
+# Normalize the ingredient
 def normalize_ingredients(text: Optional[str]) -> str:
     if not isinstance(text, str):
         return ""
@@ -61,7 +66,8 @@ def normalize_ingredients(text: Optional[str]) -> str:
     t = re.sub(r"\s+", " ", t)
     return t.strip().lower()
 
-
+# Invoked Address - from enrich function in enrichment pipeline.py.
+# Normalize instructions
 def normalize_instructions(text: Optional[str]) -> str:
     if not isinstance(text, str):
         return ""

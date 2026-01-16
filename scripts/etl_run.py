@@ -1,30 +1,82 @@
 from __future__ import annotations
 """
-etl_run.py
+    scripts/etl_run.py
 
-Purpose:
-    Unified ETL runner for the Meal Taxonomy project.
+    Purpose:
+        Unified ETL runner for the Meal Taxonomy project.
 
-    This script orchestrates:
-      • Kaggle ingestion (multiple datasets)
-      • Legacy Indian Kaggle ingestion
-      • FoodOn ontology linking (synonyms)
-      • Ontology-derived ingredient_category tagging
-      • Kaggle ontology import (cuisine/course/diet → ontology_nodes)
-      • Any additional ETL modules future (FKG, RecipeDB, embedding generation…)
+        This script orchestrates:
+        • Kaggle ingestion (multiple datasets)
+        • Legacy Indian Kaggle ingestion
+        • FoodOn ontology linking (synonyms)
+        • Ontology-derived ingredient_category tagging
+        • Kaggle ontology import (cuisine/course/diet → ontology_nodes)
+        • Any additional ETL modules future (FKG, RecipeDB, embedding generation…)
 
-Design:
-    - Uses a shared LOG_RUN_ID (from logging_utils).
-    - Emits a "Run Banner" at the start.
-    - Emits structured logs for milestone boundaries.
-    - Each ETL step can be toggled on/off.
-    - Safe to rerun — every component is idempotent.
+        Without etl_run.py, you would have to:
+        - Remember which script to run
+        - Run them in the right order
+        - Avoid accidentally mixing ontology jobs with meal ingestion
+    Core Reason: 
+        A. Why it’s designed this way (important)
+            1️⃣ Prevents dangerous mistakes
+                You cannot accidentally:
+                Load ontology while loading meals
+                Run category tagging before ontology exists
+                Mix datasets in a single run
+            2️⃣ Makes ETL idempotent
+                Each run:
+                Has a single responsibility
+                Can be safely re-run
+                Can be logged and monitored independently
+            3️⃣ Enables automation
+                This file is what you would call from:
+                Cron jobs
+                CI/CD
+                Airflow / Temporal / Prefect later
+        
+        B. What each mode actually triggers
+            --indian
+                Runs:
+                Dataset loader
+                MealETL.ingest_recipe()
+                Enrichment pipeline
+                Canonical meal logic
+                Tag + ingredient attachment
+                Search index refresh
+            --kaggle
+                Runs:
+                Same as Indian, but with Kaggle data source
+            --foodon
+                Runs:
+                Ontology ingestion scripts
+                Populates:
+                ontology_nodes
+                ontology_relations
+                No meals involved.
+            --category
+                Runs:
+                Ingredient → ontology category mapping
+                Populates:
+                entity_ontology_links
+                tag_ontology_links
+            --kaggle-onto
+                Runs:
+                Cross-linking between Kaggle meals and ontology nodes
+                Populates:
+                meals.meta
 
-Usage:
-    python scripts/etl_run.py
+    Design:
+        - Uses a shared LOG_RUN_ID (from logging_utils).
+        - Emits a "Run Banner" at the start.
+        - Emits structured logs for milestone boundaries.
+        - Each ETL step can be toggled on/off.
+        - Safe to rerun — every component is idempotent.
 
-    Or run only specific stages:
-    python scripts/etl_run.py --kaggle --foodon
+    Usage:
+        python scripts/etl_run.py
+        Or run only specific stages:
+        python scripts/etl_run.py --kaggle --foodon
 """
 
 import argparse
@@ -64,7 +116,8 @@ MODULE_PURPOSE = (
     "for the Meal Taxonomy / Indian Food platform."
 )
 
-
+# Prints the banner of the run information with Run Id
+# Invoked Address: From Run_ETL Main function
 def print_run_banner(enabled_steps: List[str]) -> None:
     now = datetime.datetime.utcnow()
     banner = [
@@ -93,8 +146,16 @@ def print_run_banner(enabled_steps: List[str]) -> None:
     # Keep pretty banner on stdout for operator visibility
     print("\n".join(banner))
 
-
+# Invoked Address : From main  within this file
+# Loads dataset from respective files
+# 
 def run_etl(args) -> None:
+    """
+    Loads data set from respective files
+        - Kaggle from data/kaggle - all csv files in data/kaggle
+        - Indian from manually generated Indian_food.csv file placed in data folder
+        - FoodOn triggeres tsv file from data folder. foodon-synonyms.tsv file creates synonym for food category. Check FoonOn_Import code file for more
+    """
     steps_run: List[str] = []
 
     # Kaggle
@@ -245,12 +306,21 @@ def run_etl(args) -> None:
 
 
 def parse_args():
+    """
+    Master switch” for loading data into the system. 
+    - Meals (from Kaggle / Indian datasets)
+    - Ingredients
+    - Ontology data (FoodOn)
+    - Category mappings
+    - Tags and relationships
+    """
     parser = argparse.ArgumentParser(description="Unified Meal Taxonomy ETL Runner")
     parser.add_argument("--kaggle", action="store_true", help="Run Kaggle ingestion")
     parser.add_argument("--indian", action="store_true", help="Run legacy Indian ingestion")
     parser.add_argument("--foodon", action="store_true", help="Run FoodOn synonyms linking")
     parser.add_argument("--category", action="store_true", help="Run category tagging")
     parser.add_argument("--kaggle-onto", action="store_true", help="Run Kaggle ontology import")
+    #parser.add_argument("--limit", type=int, efault=None, help="Maximum number of recipes/items to ingest")
     return parser.parse_args()
 
 

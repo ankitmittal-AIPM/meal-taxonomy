@@ -1,3 +1,4 @@
+from __future__ import annotations
 #!/usr/bin/env python3
 """Train Layer-1 enrichment models (scikit-learn) and export to models_store/.
 
@@ -30,8 +31,6 @@ Column defaults expected (override with flags if needed):
   - TotalTimeInMins
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import os
@@ -63,7 +62,10 @@ def _build_text(df: pd.DataFrame, col_name: str, col_ing: str, col_inst: str) ->
 def _ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
-
+# Multiclass text classifier (course, diet, region). Purpose: given text, predict one of N classes.
+# It works by TF-IDF vectorization + Logistic Regression.
+# CLF also known as "Maximum Entropy" classifier. It is similar to Naive Bayes but generally performs better. 
+# Its function is to predict the probability of each class given the input features.
 def train_multiclass_text_clf(X: List[str], y: List[str]) -> Pipeline:
     return Pipeline(
         steps=[

@@ -14,7 +14,7 @@ class RecipeRecord:
     instructions: Optional[str]
     meta: Dict                        # arbitrary metadata from dataset
     source: str                       # 'RecipeDB', 'Food.com', 'IndianKaggle', etc.
-    external_id: str                  # dataset-specific id
+    external_id: str                  # dataset-specific Meal id. This is used to avoid duplicates within dataset
     language_code: str = "en"
     cook_time_minutes: Optional[int] = None
     prep_time_minutes: Optional[int] = None

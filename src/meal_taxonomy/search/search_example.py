@@ -31,7 +31,7 @@ def run_search() -> None:
                 "diet_value": None,
                 "meal_type_value": None,
                 "region_value": None,
-                "limit": 10,
+                "limit_n": 10,
             },
         ).execute()
         rows = resp.data or []

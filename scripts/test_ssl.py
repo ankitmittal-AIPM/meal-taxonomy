@@ -1,8 +1,12 @@
 import os
+from pathlib import Path
+ROOT_DIR = Path(__file__).resolve().parents[1]
 import sys
 import httpx
 import dotenv
-from src.meal_taxonomy.logging_utils import get_logger
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+from src.meal_taxonomy.logging_utils import RUN_ID, get_logger
 
 dotenv.load_dotenv()
 
